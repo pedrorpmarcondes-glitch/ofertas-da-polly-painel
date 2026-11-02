@@ -184,7 +184,10 @@ TZ = ZoneInfo("America/Sao_Paulo")
 
 # ------------------------------------------------------------------ acesso
 if d.NUVEM and d.PERMITIDOS and d.EMAIL not in d.PERMITIDOS:
-    st.error("Acesso restrito. Peça para ser autorizado."); st.stop()
+    st.error("Acesso restrito. Peça para ser autorizado.")
+    try: st.caption(f"Conta identificada: {d.EMAIL.split('@')[0][:3]}***@{d.EMAIL.split('@')[-1]} · campos: {sorted(st.user.to_dict().keys())}")
+    except Exception as e: st.caption(f"Conta não identificada ({type(e).__name__})")
+    st.stop()
 
 
 # ------------------------------------------------------------------ componentes
