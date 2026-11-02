@@ -39,6 +39,27 @@ def quem_e():
 EMAIL = quem_e() or "painel-local"
 
 
+APP_URL = "https://ofertas-da-polly.streamlit.app/"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def app_privado():
+    """Confere de fora, sem login, se o Streamlit manda o visitante para a tela de entrada."""
+    try:
+        r = requests.get(APP_URL, allow_redirects=False, timeout=10)
+        return r.status_code in (301, 302, 303, 307) and "/-/auth/" in r.headers.get("location", "")
+    except requests.RequestException:
+        return False
+
+
+def acesso_liberado():
+    """O Streamlit privado só deixa entrar quem foi convidado, mas não informa o e-mail ao app.
+    Se o app virar público por engano, o painel se tranca sozinho. Se o e-mail vier, também confere a lista."""
+    email = quem_e()
+    if email and PERMITIDOS: return email in PERMITIDOS
+    return app_privado()
+
+
 def _h(raw=False):
     return {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github.raw+json" if raw else "application/vnd.github+json"}
 
@@ -86,6 +107,7 @@ def atualizar_local():
 
 
 def gravar(path, conteudo: bytes, sha, mensagem):
+    if NUVEM and not acesso_liberado(): raise RuntimeError("Acesso restrito.")
     if NUVEM:
         corpo = {"message": mensagem, "content": base64.b64encode(conteudo).decode(), "branch": "main"}
         if sha: corpo["sha"] = sha
