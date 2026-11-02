@@ -85,11 +85,20 @@ def ler_fila():
     txt, sha = d.ler(ARQ)
     f = json.loads(txt) if txt else {}
     f.setdefault("feed", {}); f.setdefault("stories", {})
+    # O que a rotina ja publicou fica em outro arquivo (so ela escreve nele); aqui so entra na tela.
+    pt, _ = d.ler("dados-painel/instagram-publicados.json")
+    publ = json.loads(pt) if pt else {}
+    f["_publicados"] = publ
+    for oid, v in f["feed"].items():
+        p = publ.get("feed", {}).get(f"{oid}|{v.get('agendado_para')}")
+        if p: v["postado_em"] = p.get("em")
     return f, sha
 
 
 def salvar_fila(f, sha, msg):
-    d.gravar(ARQ, json.dumps(f, ensure_ascii=False, indent=1).encode(), sha, f"painel: {msg} por {d.EMAIL}")
+    limpo = {k: v for k, v in f.items() if not k.startswith("_")}
+    for v in limpo["feed"].values(): v.pop("postado_em", None)  # vem do arquivo da rotina, nao daqui
+    d.gravar(ARQ, json.dumps(limpo, ensure_ascii=False, indent=1).encode(), sha, f"painel: {msg} por {d.EMAIL}")
     st.cache_data.clear()
 
 
@@ -273,6 +282,7 @@ def pagina(H):
         for o, v in itens:
             with st.container(border=True):
                 x, y, z = st.columns([5, 2, 1.4], vertical_alignment="center")
-                x.markdown(f"**{o}** · {str(nome(o))[:70]}"); y.caption("Todo dia às " + ", ".join(v.get("horarios", [])))
+                x.markdown(f"**{o}** · {str(nome(o))[:70]}"); ult = max((k.split("|")[2] for k in fila["_publicados"].get("stories", {}) if k.startswith(o + "|")), default=None)
+                y.caption("Todo dia às " + ", ".join(v.get("horarios", [])) + (f" · último: {ult[8:10]}/{ult[5:7]}" if ult else ""))
                 if z.button("Desmarcar", key=f"dm_{o}"):
                     fila["stories"][o]["ativo"] = False; salvar_fila(fila, fsha, f"stories {o} desligado"); st.rerun()
