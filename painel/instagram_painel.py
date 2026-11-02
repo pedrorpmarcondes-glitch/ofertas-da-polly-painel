@@ -52,12 +52,12 @@ def _b64(jpeg):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _arte(oid, formato, chave, foto, campos):
-    return arte.renderizar(dict(campos), foto, formato)
+def _arte(oid, formato, chave, foto, campos, link):
+    return arte.renderizar(dict(campos), foto, formato, mostrar_link=link)
 
 
 def _campos(c):
-    return tuple(sorted((k, str(v) if v is not None else "") for k, v in c.items() if k in ("B", "C", "E", "G", "R")))
+    return tuple(sorted((k, str(v) if v is not None else "") for k, v in c.items() if k in ("B", "C", "E", "G", "I", "R")))
 
 
 def previa_feed(jpeg, legenda):
@@ -117,7 +117,8 @@ def pagina(H):
         c = d.dict_da_linha(d.linha_da_oferta(wb, oid)); foto = d.foto(oid); campos = _campos(c)
         chave = hashlib.md5(repr((campos, bool(foto))).encode()).hexdigest()
         if not foto: st.warning("Esta oferta não tem foto: a arte sai sem imagem do produto.")
-        feed_jpg = _arte(oid, "feed", chave, foto, campos); st_jpg = _arte(oid, "stories", chave, foto, campos)
+        link = st.toggle("Mostrar o link do produto na arte", value=True, help="O Instagram não deixa o link clicável no feed nem nos stories postados pela rotina: ele aparece escrito, para a pessoa copiar ou digitar. O link clicável é o da bio.")
+        feed_jpg = _arte(oid, "feed", chave, foto, campos, link); st_jpg = _arte(oid, "stories", chave, foto, campos, link)
         a, b = st.columns([1, 1], gap="large")
         with a:
             H.secao("Feed (4:5)", "Como aparece no perfil e no feed dos seguidores")
