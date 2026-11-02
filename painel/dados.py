@@ -39,17 +39,19 @@ def quem_e():
 EMAIL = quem_e() or ("painel-online" if NUVEM else "painel-local")
 
 
-APP_URL = "https://ofertas-da-polly.streamlit.app/"
+APP_URLS = ("https://ofertasdapolly.streamlit.app/", "https://ofertas-da-polly.streamlit.app/")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def app_privado():
     """Confere de fora, sem login, se o Streamlit manda o visitante para a tela de entrada."""
-    try:
-        r = requests.get(APP_URL, allow_redirects=False, timeout=10)
-        return r.status_code in (301, 302, 303, 307) and "/-/auth/" in r.headers.get("location", "")
-    except requests.RequestException:
-        return False
+    for url in APP_URLS:
+        try:
+            r = requests.get(url, allow_redirects=False, timeout=10)
+            if r.status_code in (301, 302, 303, 307) and "/-/auth/" in r.headers.get("location", ""): return True
+        except requests.RequestException:
+            pass
+    return False
 
 
 def acesso_liberado():
