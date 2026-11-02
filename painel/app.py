@@ -5,14 +5,16 @@ sozinha: só vai para o WhatsApp depois da aprovação explícita. Só mostra n�
 """
 import hashlib
 import html
+import json
 import re
 from datetime import datetime, date, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from zoneinfo import ZoneInfo
 
 import altair as alt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import dados as d
 from dados import eo
@@ -184,10 +186,6 @@ ROXO = "#7C3AED"
 TZ = ZoneInfo("America/Sao_Paulo")
 
 # ------------------------------------------------------------------ acesso
-if d.NUVEM and not d.acesso_liberado():
-    st.error("Acesso restrito. Peça para ser autorizado."); st.stop()
-
-
 # ------------------------------------------------------------------ componentes
 def h(t): return html.escape(str(t if t is not None else ""))
 
@@ -734,6 +732,41 @@ def pg_config():
             except Exception as e: st.error(f"Não foi possível salvar: {e}")
 
 
+# ------------------------------------------------------------------ login
+def gravar_cookie(valor, dias):
+    """O Streamlit não grava cookie sozinho: isso mantém a sessão ao recarregar a página."""
+    html_c = f"""<script>document.cookie = {json.dumps(d.COOKIE + "=" + quote(valor))} + "; path=/; max-age={dias * 86400}; SameSite=Lax; Secure";
+    try {{ window.parent.document.cookie = {json.dumps(d.COOKIE + "=" + quote(valor))} + "; path=/; max-age={dias * 86400}; SameSite=Lax; Secure"; }} catch (e) {{}}</script>"""
+    components.html(html_c, height=0)
+
+
+def tela_login():
+    st.markdown("<style>[data-testid='stSidebar'],[data-testid='stExpandSidebarButton'],[data-testid='stSidebarCollapsedControl']{display:none!important}.block-container{max-width:420px;padding-top:12vh}</style>", unsafe_allow_html=True)
+    st.html(f'<div class="marca" style="justify-content:center;--texto:#1F2937;padding-bottom:.4rem"><div class="logo" style="color:var(--roxo)">{mi("shopping_bag")}</div><div><b style="font-size:1.25rem">Ofertas da Polly</b></div></div>')
+    st.html('<p class="sub" style="text-align:center;margin-bottom:1rem">Entre para acessar o painel</p>')
+    with st.container(border=True):
+        with st.form("login"):
+            email = st.text_input("E-mail", autocomplete="username")
+            senha = st.text_input("Senha", type="password", autocomplete="current-password")
+            ok = st.form_submit_button("Entrar", type="primary", width="stretch")
+        if ok:
+            e = email.strip().lower()
+            if d.bloqueado(e): st.error("Muitas tentativas. Aguarde 15 minutos.")
+            elif d.conferir_senha(e, senha):
+                st.session_state.pop("saiu", None); st.session_state["usuario"] = e; st.session_state["cookie_novo"] = d.criar_sessao(e); st.rerun()
+            else: st.error("E-mail ou senha incorretos.")
+
+
+if st.session_state.pop("sair", False):
+    gravar_cookie("", 0); st.session_state["saiu"] = True
+if d.login_ativo() and not d.usuario():
+    salvo = None if st.session_state.get("saiu") else d.ler_sessao(unquote(st.context.cookies.get(d.COOKIE, "") or ""))
+    if salvo: st.session_state["usuario"] = salvo
+    else:
+        st.navigation([st.Page(tela_login, title="Entrar", default=True)], position="hidden").run(); st.stop()
+if st.session_state.get("cookie_novo"): gravar_cookie(st.session_state.pop("cookie_novo"), d.DIAS_SESSAO)
+
+
 # ------------------------------------------------------------------ navegação (menu próprio, responsivo)
 PG_VISAO = st.Page(pg_visao, title="Visão geral", default=True)
 PG_OFER = st.Page(pg_ofertas, title="Ofertas", url_path="ofertas")
@@ -749,5 +782,7 @@ nav = st.navigation(PAGINAS, position="hidden")
 with st.sidebar:
     st.html(f'<div class="marca"><div class="logo">{mi("shopping_bag")}</div><div><b>Ofertas da Polly</b><span class="t">Painel de gestão</span></div></div>')
     for p in PAGINAS: st.page_link(p)
-    st.html(f'<div class="perfil">{mi("account_circle")}<div><b>{"Acesso privado" if d.EMAIL == "painel-online" else h(d.EMAIL)}</b>{"Online" if d.NUVEM else "Só neste computador"}</div></div>')
+    st.html(f'<div class="perfil">{mi("account_circle")}<div><b>{h(d.usuario() or d.EMAIL)}</b>{"Online" if d.NUVEM else "Só neste computador"}</div></div>')
+    if d.login_ativo() and st.button("Sair", width="stretch"):
+        st.session_state.clear(); st.session_state["sair"] = True; st.rerun()
 nav.run()

@@ -3,7 +3,7 @@
 A planilha ofertas-polly.xlsx continua sendo o banco. Nada de token do Z-API passa por aqui,
 e nenhum telefone ou nome de cliente é lido.
 """
-import sys, io, json, csv, base64, re, subprocess
+import sys, io, os, json, csv, base64, re, subprocess, hashlib, hmac, time
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -28,38 +28,66 @@ def segredo(chave, padrao=None):
 
 TOKEN, REPO = segredo("GITHUB_TOKEN"), segredo("GITHUB_REPO")
 NUVEM = bool(TOKEN and REPO)
-PERMITIDOS = [e.lower() for e in segredo("USUARIOS_PERMITIDOS", [])]
+EMAIL = "painel-online" if NUVEM else "painel-local"
 
 
-def quem_e():
-    u = getattr(st, "user", None) or getattr(st, "experimental_user", None)
-    return (getattr(u, "email", None) or "").lower() if u else ""
+# ---- login próprio: as senhas ficam só como hash no repositório privado
+ITERACOES = 300_000
+MAX_ERROS, BLOQUEIO_SEG, COOKIE, DIAS_SESSAO = 6, 900, "polly_sessao", 7
 
 
-EMAIL = quem_e() or ("painel-online" if NUVEM else "painel-local")
+def login_ativo():
+    return NUVEM or bool(os.environ.get("PAINEL_LOGIN"))
 
 
-APP_URLS = ("https://achadinhosdapolly.streamlit.app/", "https://ofertas-da-polly.streamlit.app/")
+@st.cache_resource(show_spinner=False)
+def _tentativas():
+    return {}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def app_privado():
-    """Confere de fora, sem login, se o Streamlit manda o visitante para a tela de entrada."""
-    for url in APP_URLS:
-        try:
-            r = requests.get(url, allow_redirects=False, timeout=10)
-            if r.status_code in (301, 302, 303, 307) and "/-/auth/" in r.headers.get("location", ""): return True
-        except requests.RequestException:
-            pass
-    return False
+def _acessos():
+    txt = ler("dados-painel/acessos.json")[0]
+    return json.loads(txt) if txt else {}
 
 
-def acesso_liberado():
-    """O Streamlit privado só deixa entrar quem foi convidado, mas não informa o e-mail ao app.
-    Se o app virar público por engano, o painel se tranca sozinho. Se o e-mail vier, também confere a lista."""
-    email = quem_e()
-    if email and PERMITIDOS: return email in PERMITIDOS
-    return app_privado()
+def bloqueado(email):
+    t = _tentativas().get(email)
+    return bool(t and t[0] >= MAX_ERROS and time.time() - t[1] < BLOQUEIO_SEG)
+
+
+def conferir_senha(email, senha):
+    email = email.strip().lower(); a = _acessos().get(email)
+    if bloqueado(email): return False
+    calculado = hashlib.pbkdf2_hmac("sha256", senha.encode(), bytes.fromhex(a["sal"] if a else "00" * 16), a["it"] if a else ITERACOES)
+    ok = bool(a) and hmac.compare_digest(calculado.hex(), a["hash"])
+    t = _tentativas()
+    if ok: t.pop(email, None)
+    else:
+        n = t.get(email, (0, 0))[0] + 1; t[email] = (n, time.time()); time.sleep(1.2)
+    return ok
+
+
+def _chave():
+    base = segredo("CHAVE_SESSAO") or TOKEN or os.environ.get("PAINEL_LOGIN", "")
+    return hashlib.sha256(("sessao:" + base).encode()).digest()
+
+
+def criar_sessao(email):
+    fim = int(time.time()) + DIAS_SESSAO * 86400; corpo = f"{email}|{fim}"
+    return corpo + "|" + hmac.new(_chave(), corpo.encode(), hashlib.sha256).hexdigest()
+
+
+def ler_sessao(valor):
+    try:
+        email, fim, assinatura = (valor or "").rsplit("|", 2)
+        certo = hmac.new(_chave(), f"{email}|{fim}".encode(), hashlib.sha256).hexdigest()
+        return email if hmac.compare_digest(certo, assinatura) and int(fim) > time.time() and email in _acessos() else None
+    except ValueError:
+        return None
+
+
+def usuario():
+    return st.session_state.get("usuario")
 
 
 def _h(raw=False):
@@ -109,7 +137,7 @@ def atualizar_local():
 
 
 def gravar(path, conteudo: bytes, sha, mensagem):
-    if NUVEM and not acesso_liberado(): raise RuntimeError("Acesso restrito.")
+    if login_ativo() and not usuario(): raise RuntimeError("Entre no painel para salvar.")
     if NUVEM:
         corpo = {"message": mensagem, "content": base64.b64encode(conteudo).decode(), "branch": "main"}
         if sha: corpo["sha"] = sha
