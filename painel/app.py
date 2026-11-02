@@ -109,6 +109,7 @@ h2,h3,h4{letter-spacing:-.01em;font-weight:600!important;padding:0!important}
 .tit-sec{font-size:.95rem;font-weight:600;color:var(--texto);margin:0 0 .15rem}.tit-sec small{display:block;color:var(--suave);font-weight:400;font-size:.8rem;margin-top:.1rem}
 .faixa{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));background:var(--sup);border:1px solid var(--borda);border-radius:12px}
 .faixa.tres{grid-template-columns:repeat(3,minmax(0,1fr))}
+.faixa.quatro{grid-template-columns:repeat(4,minmax(0,1fr))}
 .cel{display:flex;align-items:center;gap:.7rem;padding:.85rem 1rem;border-right:1px solid var(--borda);min-width:0}
 .cel:last-child{border-right:none}
 .cel .ic{flex:none;color:var(--suave);display:flex}
@@ -170,7 +171,7 @@ button:focus-visible,a:focus-visible,[role="radio"]:focus-visible{outline:2px so
 [data-testid="stExpander"] details{border-color:var(--borda);border-radius:10px;background:var(--sup)}
 [data-testid="stFileUploaderDropzone"]{background:var(--sup2);border:1px dashed var(--borda)}
 [data-testid="stTabs"] [data-baseweb="tab-border"]{background:var(--borda)}
-@media (max-width:900px){.faixa{grid-template-columns:repeat(2,minmax(0,1fr))}.faixa.tres{grid-template-columns:repeat(3,minmax(0,1fr))}.cel{border-bottom:1px solid var(--borda)}.cel:nth-child(2n){border-right:none}.faixa.tres .cel{border-bottom:none;border-right:1px solid var(--borda)}.faixa.tres .cel:last-child{border-right:none}}
+@media (max-width:900px){.faixa,.faixa.quatro{grid-template-columns:repeat(2,minmax(0,1fr))}.faixa.tres{grid-template-columns:repeat(3,minmax(0,1fr))}.cel{border-bottom:1px solid var(--borda)}.cel:nth-child(2n){border-right:none}.faixa.tres .cel{border-bottom:none;border-right:1px solid var(--borda)}.faixa.tres .cel:last-child{border-right:none}}
 @media (max-width:640px){.block-container{padding:3.4rem 1rem 3rem}.th{display:none}
 .tr{grid-template-columns:minmax(0,1fr) auto!important;row-gap:.2rem}.tr .cc,.tr .cl,.tr .cd{display:none}
 .g{grid-template-columns:minmax(0,1fr) auto}.g .sm,.g.h{display:none}.faixa.tres{grid-template-columns:1fr}.faixa.tres .cel{border-right:none;border-bottom:1px solid var(--borda)}.faixa.tres .cel:last-child{border-bottom:none}.cel{padding:.7rem .75rem}.cel .v{font-size:1.2rem}}
@@ -293,7 +294,8 @@ def resumo_comissoes(v):
     por = v.groupby("loja")["comissao"].sum() if len(v) else {}
     faixa([("payments", "verde", eo.brl(v["comissao"].sum()) if len(v) else "—", "Comissão total"),
            ("storefront", "", eo.brl(por["Shopee"]) if "Shopee" in por else "—", "Shopee"),
-           ("storefront", "ambar", eo.brl(por["Mercado Livre"]) if "Mercado Livre" in por else "—", "Mercado Livre")], "tres")
+           ("storefront", "ambar", eo.brl(por["Mercado Livre"]) if "Mercado Livre" in por else "—", "Mercado Livre"),
+           ("storefront", "", eo.brl(por["TikTok Shop"]) if "TikTok Shop" in por else "—", "TikTok Shop")], "quatro")
 
 
 def secao_financeiro(df):
@@ -305,7 +307,7 @@ def secao_financeiro(df):
         st.caption("Copie os números do painel de afiliados de cada loja.")
         with st.form("form_comissao", clear_on_submit=True):
             dia = st.date_input("Data", value=hoje, format="DD/MM/YYYY", max_value=hoje)
-            loja = st.selectbox("Loja", ["Shopee", "Mercado Livre"])
+            loja = st.selectbox("Loja", ["Shopee", "Mercado Livre", "TikTok Shop"])
             x, y = st.columns(2)
             cli = x.number_input("Cliques", min_value=0, step=1); ped = y.number_input("Pedidos", min_value=0, step=1)
             com = st.number_input("Comissão (R$)", min_value=0.0, step=0.01, format="%.2f")
@@ -671,7 +673,7 @@ def pg_dados():
               ("chat", "WhatsApp (Z-API)", f"Membros por grupo: {quando}", "Conectado" if metr else "Pendente"),
               ("storefront", "Shopee: cliques, pedidos e comissão", "A API exige pedir acesso à Shopee. Sem ela, registre na Visão geral", st_loja("Shopee")),
               ("storefront", "Mercado Livre: cliques, pedidos e comissão", "Sem conexão automática. Registre na Visão geral", st_loja("Mercado Livre")),
-              ("smartphone", "TikTok Shop", "Só existe no app do celular", "Sem fonte"),
+              ("smartphone", "TikTok Shop: comissão", "Só existe no app do celular. Registre na Visão geral", st_loja("TikTok Shop")),
               ("shopping_cart", "Compradores", "As lojas não informam; exigiria cadastro próprio", "Indisponível")]
     cores = {"Conectado": "Enviada", "Modo local": "Aprovada", "Registro manual": "Aprovada", "Pendente": "Aguardando aprovação", "Não conectado": "Aguardando aprovação", "Sem fonte": "Removida", "Indisponível": "Removida"}
     with st.container(border=True):
