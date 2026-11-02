@@ -77,6 +77,7 @@ CSS = """
 [data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]::before{content:"";flex:none;width:20px;height:20px;margin-right:.75rem;background:currentColor;opacity:.85}
 .stApp{background:var(--fundo);color:var(--texto)}
 [data-testid="stHeader"]{background:transparent}
+[data-testid="stToolbarActions"]{display:none!important}
 .block-container{padding:2.1rem 2.2rem 4rem;max-width:1260px}
 h1{font-size:1.5rem!important;font-weight:700!important;letter-spacing:-.02em;padding:0!important;margin:0!important}
 h2,h3,h4{letter-spacing:-.01em;font-weight:600!important;padding:0!important}
