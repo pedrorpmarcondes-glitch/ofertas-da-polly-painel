@@ -161,7 +161,7 @@ def _lote(H, ofertas, fila, fsha):
     with g2:
         usar_st = st.toggle("Stories todos os dias", value=False, key="lt_st")
         slots_s = horarios_de(st.text_input("Horários dos stories", "09:00, 19:00", key="lt_hs"))
-        modo = st.radio("Distribuição", ["Cada story em todos os horários", "Um horário por story, em rodízio"], key="lt_modo")
+        st.caption("Todos os produtos selecionados são postados em cada horário, todos os dias, até você desmarcar.")
     link = st.toggle("Mostrar também o link do produto na arte e na legenda (padrão: só “link na bio”)", value=False, key="lt_link")
     if usar_feed and not slots_f: st.error("Horários do feed inválidos. Use o formato 10:30, 14:30."); return
     if usar_st and not slots_s: st.error("Horários dos stories inválidos. Use o formato 09:00, 19:00."); return
@@ -171,7 +171,7 @@ def _lote(H, ofertas, fila, fsha):
     ja_postado = {o for o, v in fila["feed"].items() if v.get("postado_em")}
     feed_ids = [o for o in ord_ids if o not in ja_postado] if usar_feed else []
     plano = _distribuir(feed_ids, dia0, slots_f) if usar_feed else []
-    por_dia_st = (len(ids) * len(slots_s) if modo.startswith("Cada") else len(ids)) if usar_st else 0
+    por_dia_st = len(ids) * len(slots_s) if usar_st else 0
     st.divider(); H.secao("Resumo antes de aplicar")
     r1, r2 = st.columns(2, gap="large")
     nomes = ofertas.set_index("ID")["Produto"]
@@ -185,7 +185,8 @@ def _lote(H, ofertas, fila, fsha):
     with r2:
         if usar_st:
             st.markdown(f"**Stories:** {por_dia_st} por dia, todos os dias, até você desmarcar")
-            if por_dia_st > 12: st.warning("Muitos stories por dia. Considere um horário por story, em rodízio.")
+            if usar_st: st.caption(f"{len(ids)} stories em cada um dos {len(slots_s)} horário(s) ({', '.join(slots_s)}), um depois do outro.")
+            if por_dia_st > 30: st.warning("Mais de 30 stories por dia é muito: o Instagram limita 100 publicações por dia pela API e a audiência cansa. Considere menos produtos ou menos horários.")
     with st.expander("Ver como fica um desses produtos"):
         pid = st.selectbox("Produto", ids, format_func=lambda o: f"{o} · {str(nomes.get(o, o))[:50]}", key="lt_prev")
         wb, _, _, _ = H.contexto(); c = d.dict_da_linha(d.linha_da_oferta(wb, pid)); foto = d.foto(pid); campos = _campos(c)
@@ -193,14 +194,13 @@ def _lote(H, ofertas, fila, fsha):
         p1, p2 = st.columns(2)
         p1.html(previa_feed(_arte(pid, "feed", chave, foto, campos, link), arte.legenda(c, link_produto=link)))
         p2.html(previa_stories(_arte(pid, "stories", chave, foto, campos, link), True))
-    conf = st.checkbox(f"Confirmo aprovar {len(plano)} post(s) no feed e {por_dia_st} story(ies) por dia", key="lt_conf")
-    if st.button("Aprovar e agendar em lote", type="primary", disabled=not conf, key="lt_go"):
+    conf = st.checkbox(f"Confirmo: {len(plano)} post(s) no feed e {por_dia_st} story(ies) por dia serão publicados sozinhos nos horários marcados", key="lt_conf")
+    if st.button("Salvar e publicar no site", type="primary", disabled=not conf, key="lt_go"):
         for o, d_, h_ in plano:
             fila["feed"][o] = {"status": "aprovado", "agendado_para": f"{d_:%Y-%m-%d}T{h_}", "por": d.EMAIL, "postado_em": None, "link_produto": bool(link)}
         if usar_st:
             for i, o in enumerate(ord_ids):
-                hs = list(slots_s) if modo.startswith("Cada") else [slots_s[i % len(slots_s)]]
-                fila["stories"][o] = {"ativo": True, "horarios": hs, "por": d.EMAIL, "link_produto": bool(link)}
+                fila["stories"][o] = {"ativo": True, "horarios": list(slots_s), "por": d.EMAIL, "link_produto": bool(link)}
         salvar_fila(fila, fsha, f"lote: {len(plano)} feed e {len(ord_ids) if usar_st else 0} stories")
         st.session_state["lt_conf"] = False; st.toast("Lote agendado"); st.rerun()
 
