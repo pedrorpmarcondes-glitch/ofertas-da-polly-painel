@@ -8,6 +8,8 @@ import base64, hashlib, json, re
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 
+import importlib
+
 import streamlit as st
 
 import dados as d
@@ -102,6 +104,9 @@ def horarios_de(txt):
 
 # ------------------------------------------------------------------ pagina
 def pagina(H):
+    # arte_instagram.py fica fora da pasta do painel: o Streamlit nao recarrega esse arquivo sozinho quando ele muda
+    # (isso causava TypeError logo apos uma atualizacao). Recarregar aqui garante que as duas pecas andem juntas.
+    importlib.reload(arte)
     st.html(CSS)
     wb, sha, df, aux = H.contexto()
     H.cabecalho("Instagram", "Veja como o post fica, aprove e agende. Só o que você aprovar vai ao ar.")
@@ -117,13 +122,13 @@ def pagina(H):
         c = d.dict_da_linha(d.linha_da_oferta(wb, oid)); foto = d.foto(oid); campos = _campos(c)
         chave = hashlib.md5(repr((campos, bool(foto))).encode()).hexdigest()
         if not foto: st.warning("Esta oferta não tem foto: a arte sai sem imagem do produto.")
-        link = st.toggle("Mostrar o link do produto na arte", value=True, help="O Instagram não deixa o link clicável no feed nem nos stories postados pela rotina: ele aparece escrito, para a pessoa copiar ou digitar. O link clicável é o da bio.")
+        link = st.toggle("Mostrar também o link do produto (padrão: só “link na bio”)", value=False, help="O Instagram não deixa o link clicável no feed nem nos stories postados pela rotina: ele aparece escrito, para a pessoa copiar ou digitar. O link clicável é o da bio.")
         feed_jpg = _arte(oid, "feed", chave, foto, campos, link); st_jpg = _arte(oid, "stories", chave, foto, campos, link)
         a, b = st.columns([1, 1], gap="large")
         with a:
             H.secao("Feed (4:5)", "Como aparece no perfil e no feed dos seguidores")
-            st.html(previa_feed(feed_jpg, arte.legenda(c)))
-            with st.expander("Legenda completa"): st.text(arte.legenda(c))
+            st.html(previa_feed(feed_jpg, arte.legenda(c, link_produto=link)))
+            with st.expander("Legenda completa"): st.text(arte.legenda(c, link_produto=link))
         with b:
             H.secao("Stories (9:16)", "As faixas rosa mostram onde o Instagram cobre a arte")
             zonas = st.toggle("Mostrar faixas de segurança", value=True)

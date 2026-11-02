@@ -141,11 +141,11 @@ def renderizar(c, foto_bytes, formato="feed", cta=None, mostrar_link=False):
     return buf.getvalue()
 
 
-def legenda(c, link_bio="Link na bio 👆 (entre na comunidade e escolha seus grupos)"):
+def legenda(c, link_bio="Link na bio 👆 (entre na comunidade e escolha seus grupos)", link_produto=False):
     """Legenda do feed. O link de afiliado nao vai aqui (nao clica no Instagram): o post leva a bio."""
     preco = preco_texto(c.get("E"))
     linhas = [c.get("R") or "", f"🛍️ {c.get('B')}", f"💰 {preco}"]
     if c.get("G"): linhas.append(f"🏷️ Cupom: {c['G']}")
-    if c.get("I"): linhas += ["", f"🔗 Link do produto (copie e cole no navegador): {c['I']}"]
+    if link_produto and c.get("I"): linhas += ["", f"🔗 Link do produto (copie e cole no navegador): {c['I']}"]
     linhas += ["", f"👉 {link_bio}", "", f"{BASE_TAGS} {HASHTAGS.get(c.get('C'), '')}".strip()]
     return "\n".join(x for i, x in enumerate(linhas) if x or (i and linhas[i - 1]))[:2200].strip()
