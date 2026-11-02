@@ -9,7 +9,9 @@ from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 
 import importlib
+import random
 
+import pandas as pd
 import streamlit as st
 
 import dados as d
@@ -102,6 +104,98 @@ def horarios_de(txt):
     return sorted(set(out))
 
 
+
+def _distribuir(ids, dia0, slots):
+    """Um post por horario, dia a dia: o 1o produto no 1o horario, o 2o no 2o... e, acabados os horarios, passa ao dia seguinte."""
+    out, dia, k = [], dia0, 0
+    for o in ids:
+        out.append((o, dia, slots[k])); k += 1
+        if k == len(slots): k, dia = 0, dia + timedelta(days=1)
+    return out
+
+
+def _lote(H, ofertas, fila, fsha):
+    H.secao("Escolher produtos", "Filtre por categoria, marque os produtos (ou todos) e aplique a mesma configuração neles")
+    cats = sorted(ofertas["Categoria"].dropna().unique())
+    c1, c2 = st.columns([2, 1])
+    cat_sel = c1.multiselect("Categorias", cats, default=cats, key="lt_cat")
+    busca = c2.text_input("Buscar no nome", key="lt_busca")
+    ja_feed = {o for o, v in fila["feed"].items() if v.get("status") == "aprovado" and not v.get("postado_em")}
+    ja_st = {o for o, v in fila["stories"].items() if v.get("ativo")}
+    so_novos = st.checkbox("Mostrar só quem ainda não está agendado (feed ou stories)", key="lt_novos")
+    f = ofertas[ofertas["Categoria"].isin(cat_sel)]
+    if busca.strip(): f = f[f["Produto"].str.contains(busca.strip(), case=False, na=False)]
+    if so_novos: f = f[~f["ID"].isin(ja_feed | ja_st)]
+    if f.empty:
+        with st.container(border=True): H.vazio("search_off", "Nenhum produto neste filtro", "Mude as categorias ou a busca.")
+        return
+    ver = st.session_state.setdefault("lt_ver", 0)
+    b1, b2, _ = st.columns([1, 1, 3])
+    if b1.button("Selecionar todos do filtro", width="stretch"): st.session_state["lt_padrao"] = True; st.session_state["lt_ver"] = ver + 1; st.rerun()
+    if b2.button("Limpar seleção", width="stretch"): st.session_state["lt_padrao"] = False; st.session_state["lt_ver"] = ver + 1; st.rerun()
+    base = pd.DataFrame({"Selecionar": bool(st.session_state.get("lt_padrao", False)), "ID": f["ID"].values, "Produto": f["Produto"].str.slice(0, 70).values,
+                         "Categoria": f["Categoria"].values, "Preço": f["Preço"].values,
+                         "Feed": ["agendado" if i in ja_feed else "" for i in f["ID"]], "Stories": ["todo dia" if i in ja_st else "" for i in f["ID"]]})
+    ed = st.data_editor(base, key=f"lt_ed_{ver}_{len(f)}_{hash(tuple(f['ID']))}", hide_index=True, width="stretch", height=min(440, 42 + 36 * len(base)),
+                        disabled=[c for c in base.columns if c != "Selecionar"], column_config={"Selecionar": st.column_config.CheckboxColumn(required=True)})
+    ids = ed.loc[ed["Selecionar"], "ID"].tolist()
+    st.caption(f"{len(ids)} de {len(base)} produtos selecionados")
+    if not ids: return
+    st.divider()
+    H.secao("Configuração", "Vale para todos os produtos selecionados")
+    g1, g2 = st.columns(2, gap="large")
+    with g1:
+        usar_feed = st.toggle("Agendar no feed (post único)", value=True, key="lt_feed")
+        slots_f = horarios_de(st.text_input("Horários do feed (um produto por horário)", "10:30, 14:30, 19:30", key="lt_hf"))
+        dia0 = st.date_input("Começar no dia", value=(datetime.now(FUSO) + timedelta(days=1)).date(), min_value=date.today(), format="DD/MM/YYYY", key="lt_dia")
+        ordem = st.radio("Ordem dos posts", ["Como está na lista", "Embaralhar"], horizontal=True, key="lt_ordem")
+    with g2:
+        usar_st = st.toggle("Stories todos os dias", value=False, key="lt_st")
+        slots_s = horarios_de(st.text_input("Horários dos stories", "09:00, 19:00", key="lt_hs"))
+        modo = st.radio("Distribuição", ["Cada story em todos os horários", "Um horário por story, em rodízio"], key="lt_modo")
+    link = st.toggle("Mostrar também o link do produto na arte e na legenda (padrão: só “link na bio”)", value=False, key="lt_link")
+    if usar_feed and not slots_f: st.error("Horários do feed inválidos. Use o formato 10:30, 14:30."); return
+    if usar_st and not slots_s: st.error("Horários dos stories inválidos. Use o formato 09:00, 19:00."); return
+    if not (usar_feed or usar_st): st.info("Ligue o feed, os stories ou os dois."); return
+    ord_ids = list(ids)
+    if ordem == "Embaralhar": random.Random(len(ids) + dia0.toordinal()).shuffle(ord_ids)
+    ja_postado = {o for o, v in fila["feed"].items() if v.get("postado_em")}
+    feed_ids = [o for o in ord_ids if o not in ja_postado] if usar_feed else []
+    plano = _distribuir(feed_ids, dia0, slots_f) if usar_feed else []
+    por_dia_st = (len(ids) * len(slots_s) if modo.startswith("Cada") else len(ids)) if usar_st else 0
+    st.divider(); H.secao("Resumo antes de aplicar")
+    r1, r2 = st.columns(2, gap="large")
+    nomes = ofertas.set_index("ID")["Produto"]
+    with r1:
+        if usar_feed:
+            st.markdown(f"**Feed:** {len(plano)} posts, de {plano[0][1]:%d/%m} a {plano[-1][1]:%d/%m}" if plano else "**Feed:** nenhum post novo")
+            if len(ids) != len(feed_ids): st.caption(f"{len(ids) - len(feed_ids)} já foram postados no feed e ficam de fora.")
+            st.dataframe(pd.DataFrame([{"Dia": f"{d_:%d/%m}", "Hora": h_, "Produto": str(nomes.get(o, o))[:60]} for o, d_, h_ in plano[:12]]), hide_index=True, width="stretch")
+            if len(plano) > 12: st.caption(f"… e mais {len(plano) - 12} posts")
+            if len(slots_f) > 4: st.warning("Mais de 4 posts por dia no feed pode parecer spam e levar a restrição da conta.")
+    with r2:
+        if usar_st:
+            st.markdown(f"**Stories:** {por_dia_st} por dia, todos os dias, até você desmarcar")
+            if por_dia_st > 12: st.warning("Muitos stories por dia. Considere um horário por story, em rodízio.")
+    with st.expander("Ver como fica um desses produtos"):
+        pid = st.selectbox("Produto", ids, format_func=lambda o: f"{o} · {str(nomes.get(o, o))[:50]}", key="lt_prev")
+        wb, _, _, _ = H.contexto(); c = d.dict_da_linha(d.linha_da_oferta(wb, pid)); foto = d.foto(pid); campos = _campos(c)
+        chave = hashlib.md5(repr((campos, bool(foto))).encode()).hexdigest()
+        p1, p2 = st.columns(2)
+        p1.html(previa_feed(_arte(pid, "feed", chave, foto, campos, link), arte.legenda(c, link_produto=link)))
+        p2.html(previa_stories(_arte(pid, "stories", chave, foto, campos, link), True))
+    conf = st.checkbox(f"Confirmo aprovar {len(plano)} post(s) no feed e {por_dia_st} story(ies) por dia", key="lt_conf")
+    if st.button("Aprovar e agendar em lote", type="primary", disabled=not conf, key="lt_go"):
+        for o, d_, h_ in plano:
+            fila["feed"][o] = {"status": "aprovado", "agendado_para": f"{d_:%Y-%m-%d}T{h_}", "por": d.EMAIL, "postado_em": None, "link_produto": bool(link)}
+        if usar_st:
+            for i, o in enumerate(ord_ids):
+                hs = list(slots_s) if modo.startswith("Cada") else [slots_s[i % len(slots_s)]]
+                fila["stories"][o] = {"ativo": True, "horarios": hs, "por": d.EMAIL, "link_produto": bool(link)}
+        salvar_fila(fila, fsha, f"lote: {len(plano)} feed e {len(ord_ids) if usar_st else 0} stories")
+        st.session_state["lt_conf"] = False; st.toast("Lote agendado"); st.rerun()
+
+
 # ------------------------------------------------------------------ pagina
 def pagina(H):
     # arte_instagram.py fica fora da pasta do painel: o Streamlit nao recarrega esse arquivo sozinho quando ele muda
@@ -115,7 +209,7 @@ def pagina(H):
         with st.container(border=True): H.vazio("image", "Nenhuma oferta aprovada", "Aprove ofertas em “Revisar e enviar” para criar posts.")
         return
     fila, fsha = ler_fila()
-    t1, t2, t3 = st.tabs(["Prévia e aprovação", f"Agenda do feed ({sum(1 for v in fila['feed'].values() if v.get('status') == 'aprovado' and not v.get('postado_em'))})",
+    t1, tl, t2, t3 = st.tabs(["Prévia e aprovação", "Em lote (vários produtos)", f"Agenda do feed ({sum(1 for v in fila['feed'].values() if v.get('status') == 'aprovado' and not v.get('postado_em'))})",
                           f"Biblioteca de stories ({sum(1 for v in fila['stories'].values() if v.get('ativo'))} ativos)"])
     with t1:
         esc = st.selectbox("Produto", (ofertas["ID"] + " · " + ofertas["Produto"].str.slice(0, 70)).tolist()); oid = esc.split(" · ")[0]
@@ -144,7 +238,7 @@ def pagina(H):
             if atual: st.caption(f"Situação atual: {atual.get('status')} · {str(atual.get('agendado_para', ''))[:16].replace('T', ' ')}" + (" · já postado" if atual.get("postado_em") else ""))
             g1, g2 = st.columns(2)
             if g1.button("Aprovar e agendar", type="primary", key=f"ap_{oid}", width="stretch"):
-                fila["feed"][oid] = {"status": "aprovado", "agendado_para": f"{dia:%Y-%m-%d}T{hora:%H:%M}", "por": d.EMAIL, "postado_em": None}
+                fila["feed"][oid] = {"status": "aprovado", "agendado_para": f"{dia:%Y-%m-%d}T{hora:%H:%M}", "por": d.EMAIL, "postado_em": None, "link_produto": bool(link)}
                 salvar_fila(fila, fsha, f"feed {oid} aprovado para {dia:%d/%m} {hora:%H:%M}"); st.toast("Feed agendado"); st.rerun()
             if g2.button("Rejeitar", key=f"rj_{oid}", width="stretch"):
                 fila["feed"][oid] = {"status": "rejeitado", "por": d.EMAIL}; salvar_fila(fila, fsha, f"feed {oid} rejeitado"); st.rerun()
@@ -156,9 +250,11 @@ def pagina(H):
             hs = horarios_de(txt)
             if hs is None: st.error("Horário inválido. Use o formato 09:00, 19:30.")
             elif st.button("Salvar stories", type="primary", key=f"ss_{oid}", width="stretch"):
-                fila["stories"][oid] = {"ativo": bool(ativo), "horarios": hs, "por": d.EMAIL}
+                fila["stories"][oid] = {"ativo": bool(ativo), "horarios": hs, "por": d.EMAIL, "link_produto": bool(link)}
                 salvar_fila(fila, fsha, f"stories {oid} {'ativo' if ativo else 'desligado'} {','.join(hs)}"); st.toast("Stories salvos"); st.rerun()
         st.caption("A rotina confere a agenda de 15 em 15 minutos, então o post sai até 15 minutos depois do horário marcado.")
+    with tl:
+        _lote(H, ofertas, fila, fsha)
     nome = lambda o: ofertas.set_index("ID")["Produto"].get(o, o)
     with t2:
         itens = sorted(((o, v) for o, v in fila["feed"].items() if v.get("status") == "aprovado"), key=lambda x: x[1].get("agendado_para", ""))
