@@ -748,5 +748,5 @@ nav = st.navigation(PAGINAS, position="hidden")
 with st.sidebar:
     st.html(f'<div class="marca"><div class="logo">{mi("shopping_bag")}</div><div><b>Ofertas da Polly</b><span class="t">Painel de gestão</span></div></div>')
     for p in PAGINAS: st.page_link(p)
-    st.html(f'<div class="perfil">{mi("account_circle")}<div><b>{h(d.EMAIL)}</b>{"Online" if d.NUVEM else "Só neste computador"}</div></div>')
+    st.html(f'<div class="perfil">{mi("account_circle")}<div><b>{"Acesso privado" if d.EMAIL == "painel-online" else h(d.EMAIL)}</b>{"Online" if d.NUVEM else "Só neste computador"}</div></div>')
 nav.run()

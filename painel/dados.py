@@ -36,7 +36,7 @@ def quem_e():
     return (getattr(u, "email", None) or "").lower() if u else ""
 
 
-EMAIL = quem_e() or "painel-local"
+EMAIL = quem_e() or ("painel-online" if NUVEM else "painel-local")
 
 
 APP_URL = "https://ofertas-da-polly.streamlit.app/"
