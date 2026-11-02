@@ -744,6 +744,9 @@ def tela_login():
     st.markdown("<style>[data-testid='stSidebar'],[data-testid='stExpandSidebarButton'],[data-testid='stSidebarCollapsedControl']{display:none!important}.block-container{max-width:420px;padding-top:12vh}</style>", unsafe_allow_html=True)
     st.html(f'<div class="marca" style="justify-content:center;--texto:#1F2937;padding-bottom:.4rem"><div class="logo" style="color:var(--roxo)">{mi("shopping_bag")}</div><div><b style="font-size:1.25rem">Ofertas da Polly</b></div></div>')
     st.html('<p class="sub" style="text-align:center;margin-bottom:1rem">Entre para acessar o painel</p>')
+    try: pronto = bool(d._acessos())
+    except Exception: pronto = False
+    if not pronto: st.error("Login indisponível: o painel não conseguiu ler os acessos.")
     with st.container(border=True):
         with st.form("login"):
             email = st.text_input("E-mail", autocomplete="username")
