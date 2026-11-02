@@ -114,12 +114,15 @@ def horarios_de(txt):
 
 
 
-def _distribuir(ids, dia0, slots):
-    """Um post por horario, dia a dia: o 1o produto no 1o horario, o 2o no 2o... e, acabados os horarios, passa ao dia seguinte."""
-    out, dia, k = [], dia0, 0
+def _agendar_por_intervalo(ids, inicio, intervalo, jan_ini, jan_fim):
+    """Um post a cada `intervalo`, a partir de `inicio`. Fora da janela diaria (ex.: de madrugada) o post vai para o inicio da janela do dia seguinte."""
+    out, t = [], inicio
     for o in ids:
-        out.append((o, dia, slots[k])); k += 1
-        if k == len(slots): k, dia = 0, dia + timedelta(days=1)
+        dia_ini = t.replace(hour=jan_ini.hour, minute=jan_ini.minute, second=0, microsecond=0)
+        dia_fim = t.replace(hour=jan_fim.hour, minute=jan_fim.minute, second=0, microsecond=0)
+        if t < dia_ini: t = dia_ini
+        elif t > dia_fim: t = dia_ini + timedelta(days=1)
+        out.append((o, t)); t = t + intervalo
     return out
 
 
@@ -155,33 +158,47 @@ def _lote(H, ofertas, fila, fsha):
     g1, g2 = st.columns(2, gap="large")
     with g1:
         usar_feed = st.toggle("Agendar no feed (post único)", value=True, key="lt_feed")
-        slots_f = horarios_de(st.text_input("Horários do feed (um produto por horário)", "10:30, 14:30, 19:30", key="lt_hf"))
         dia0 = st.date_input("Começar no dia", value=(datetime.now(FUSO) + timedelta(days=1)).date(), min_value=date.today(), format="DD/MM/YYYY", key="lt_dia")
+        hora0 = st.time_input("Horário do primeiro post", value=time(10, 30), step=900, key="lt_h0")
+        i1, i2 = st.columns(2)
+        qtd = i1.number_input("Intervalo entre os posts", min_value=1, max_value=999, value=4, step=1, key="lt_int")
+        unid = i2.selectbox("Unidade", ["horas", "minutos", "dias"], key="lt_un")
+        j1, j2 = st.columns(2)
+        jan_ini = j1.time_input("Não postar antes de", value=time(8, 0), step=900, key="lt_j1")
+        jan_fim = j2.time_input("Nem depois de", value=time(22, 0), step=900, key="lt_j2")
         ordem = st.radio("Ordem dos posts", ["Como está na lista", "Embaralhar"], horizontal=True, key="lt_ordem")
     with g2:
         usar_st = st.toggle("Stories todos os dias", value=False, key="lt_st")
         slots_s = horarios_de(st.text_input("Horários dos stories", "09:00, 19:00", key="lt_hs"))
         st.caption("Todos os produtos selecionados são postados em cada horário, todos os dias, até você desmarcar.")
     link = st.toggle("Mostrar também o link do produto na arte e na legenda (padrão: só “link na bio”)", value=False, key="lt_link")
-    if usar_feed and not slots_f: st.error("Horários do feed inválidos. Use o formato 10:30, 14:30."); return
+    intervalo = timedelta(**{{"horas": "hours", "minutos": "minutes", "dias": "days"}[unid]: int(qtd)})
+    if usar_feed and jan_ini >= jan_fim: st.error("A janela de horário está invertida: “antes de” precisa ser menor que “depois de”."); return
     if usar_st and not slots_s: st.error("Horários dos stories inválidos. Use o formato 09:00, 19:00."); return
     if not (usar_feed or usar_st): st.info("Ligue o feed, os stories ou os dois."); return
     ord_ids = list(ids)
     if ordem == "Embaralhar": random.Random(len(ids) + dia0.toordinal()).shuffle(ord_ids)
     ja_postado = {o for o, v in fila["feed"].items() if v.get("postado_em")}
     feed_ids = [o for o in ord_ids if o not in ja_postado] if usar_feed else []
-    plano = _distribuir(feed_ids, dia0, slots_f) if usar_feed else []
+    agenda = _agendar_por_intervalo(feed_ids, datetime.combine(dia0, hora0), intervalo, jan_ini, jan_fim) if usar_feed else []
+    plano = [(o, t.date(), f"{t:%H:%M}") for o, t in agenda]
     por_dia_st = len(ids) * len(slots_s) if usar_st else 0
     st.divider(); H.secao("Resumo antes de aplicar")
     r1, r2 = st.columns(2, gap="large")
     nomes = ofertas.set_index("ID")["Produto"]
     with r1:
         if usar_feed:
-            st.markdown(f"**Feed:** {len(plano)} posts, de {plano[0][1]:%d/%m} a {plano[-1][1]:%d/%m}" if plano else "**Feed:** nenhum post novo")
+            if agenda:
+                ult = agenda[-1][1]; dias = (ult.date() - agenda[0][1].date()).days + 1
+                st.markdown(f"**Feed:** {len(plano)} posts, de {agenda[0][1]:%d/%m} a **{ult:%d/%m/%Y} às {ult:%H:%M}** ({dias} dias)")
+                st.success(f"O último post sai em {ult:%d/%m/%Y} às {ult:%H:%M}.")
+            else: st.markdown("**Feed:** nenhum post novo")
             if len(ids) != len(feed_ids): st.caption(f"{len(ids) - len(feed_ids)} já foram postados no feed e ficam de fora.")
             st.dataframe(pd.DataFrame([{"Dia": f"{d_:%d/%m}", "Hora": h_, "Produto": str(nomes.get(o, o))[:60]} for o, d_, h_ in plano[:12]]), hide_index=True, width="stretch")
             if len(plano) > 12: st.caption(f"… e mais {len(plano) - 12} posts")
-            if len(slots_f) > 4: st.warning("Mais de 4 posts por dia no feed pode parecer spam e levar a restrição da conta.")
+            por_dia = max((sum(1 for _, t in agenda if t.date() == dd) for dd in {t.date() for _, t in agenda}), default=0)
+            if por_dia > 4: st.warning(f"Até {por_dia} posts por dia no feed pode parecer spam e levar a restrição da conta. Aumente o intervalo.")
+            if intervalo < timedelta(minutes=60): st.warning("Intervalo menor que 1 hora entre posts do feed não é recomendado.")
     with r2:
         if usar_st:
             st.markdown(f"**Stories:** {por_dia_st} por dia, todos os dias, até você desmarcar")
