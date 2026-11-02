@@ -39,7 +39,7 @@ def quem_e():
 EMAIL = quem_e() or ("painel-online" if NUVEM else "painel-local")
 
 
-APP_URLS = ("https://ofertasdapolly.streamlit.app/", "https://ofertas-da-polly.streamlit.app/")
+APP_URLS = ("https://achadinhosdapolly.streamlit.app/", "https://ofertas-da-polly.streamlit.app/")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
