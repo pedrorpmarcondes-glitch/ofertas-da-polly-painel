@@ -17,6 +17,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import dados as d
+import instagram_painel as igp
+from types import SimpleNamespace
 from dados import eo
 
 st.set_page_config(page_title="Ofertas da Polly", page_icon=":material/shopping_bag:", layout="wide", initial_sidebar_state="auto")
@@ -55,7 +57,7 @@ ICONES = {
     "gear": '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
     "plug": '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
 }
-NAV_ICONES = ["dash", "sell", "plus", "check", "forum", "group", "insights", "plug", "gear"]
+NAV_ICONES = ["dash", "sell", "plus", "check", "smartphone", "forum", "group", "insights", "plug", "gear"]
 
 
 def css_menu():
@@ -777,12 +779,13 @@ PG_VISAO = st.Page(pg_visao, title="Visão geral", default=True)
 PG_OFER = st.Page(pg_ofertas, title="Ofertas", url_path="ofertas")
 PG_CAD = st.Page(pg_cadastro, title="Cadastrar oferta", url_path="cadastrar")
 PG_REV = st.Page(pg_revisao, title="Revisar e enviar", url_path="revisar")
+PG_INS = st.Page(lambda: igp.pagina(SimpleNamespace(cabecalho=cabecalho, secao=secao, vazio=vazio, contexto=contexto)), title="Instagram", url_path="instagram")
 PG_GRU = st.Page(pg_grupos, title="Comunidades e grupos", url_path="grupos")
 PG_CLI = st.Page(pg_clientes, title="Clientes", url_path="clientes")
 PG_DES = st.Page(pg_desempenho, title="Desempenho", url_path="desempenho")
 PG_DAD = st.Page(pg_dados, title="Dados e integrações", url_path="dados")
 PG_CFG = st.Page(pg_config, title="Configurações", url_path="configuracoes")
-PAGINAS = [PG_VISAO, PG_OFER, PG_CAD, PG_REV, PG_GRU, PG_CLI, PG_DES, PG_DAD, PG_CFG]
+PAGINAS = [PG_VISAO, PG_OFER, PG_CAD, PG_REV, PG_INS, PG_GRU, PG_CLI, PG_DES, PG_DAD, PG_CFG]
 nav = st.navigation(PAGINAS, position="hidden")
 with st.sidebar:
     st.html(f'<div class="marca"><div class="logo">{mi("shopping_bag")}</div><div><b>Ofertas da Polly</b><span class="t">Painel de gestão</span></div></div>')
