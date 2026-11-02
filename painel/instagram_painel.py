@@ -169,12 +169,25 @@ def _lote(H, ofertas, fila, fsha):
         ordem = st.radio("Ordem dos posts", ["Como está na lista", "Embaralhar"], horizontal=True, key="lt_ordem")
     with g2:
         usar_st = st.toggle("Stories todos os dias", value=False, key="lt_st")
-        slots_s = horarios_de(st.text_input("Horários dos stories", "09:00, 19:00", key="lt_hs"))
-        st.caption("Todos os produtos selecionados são postados em cada horário, todos os dias, até você desmarcar.")
+        modo_st = st.radio("Como postar os stories", ["Rotação aleatória (sem repetir)", "Fixo: todos nos horários marcados"], key="lt_modo_st")
+        rot = modo_st.startswith("Rot")
+        if rot:
+            r1, r2 = st.columns(2)
+            por_dia_r = int(r1.number_input("Stories por dia", min_value=1, max_value=100, value=25, step=1, key="lt_pd"))
+            ini_r = r2.time_input("Horário do primeiro story", value=time(9, 0), step=900, key="lt_ir")
+            int_r = int(st.number_input("Intervalo entre stories (minutos)", min_value=5, max_value=240, value=30, step=5, key="lt_ii"))
+            st.caption("Cada dia sorteia produtos que ainda não saíram. Quando todos tiverem saído, recomeça do zero, sem repetir os do dia anterior.")
+            slots_s = ["rot"]
+        else:
+            slots_s = horarios_de(st.text_input("Horários dos stories", "09:00, 19:00", key="lt_hs"))
+            st.caption("Todos os produtos selecionados são postados em cada horário, todos os dias, até você desmarcar.")
     link = st.toggle("Mostrar também o link do produto na arte e na legenda (padrão: só “link na bio”)", value=False, key="lt_link")
     intervalo = timedelta(**{{"horas": "hours", "minutos": "minutes", "dias": "days"}[unid]: int(qtd)})
     if usar_feed and jan_ini >= jan_fim: st.error("A janela de horário está invertida: “antes de” precisa ser menor que “depois de”."); return
-    if usar_st and not slots_s: st.error("Horários dos stories inválidos. Use o formato 09:00, 19:00."); return
+    if usar_st and not rot and not slots_s: st.error("Horários dos stories inválidos. Use o formato 09:00, 19:00."); return
+    if usar_st and rot:
+        fim_r = datetime.combine(date.today(), ini_r) + timedelta(minutes=int_r * (min(por_dia_r, len(ids)) - 1))
+        if fim_r.date() != date.today(): st.error("Os stories não cabem no dia: diminua a quantidade, o intervalo ou comece mais cedo."); return
     if not (usar_feed or usar_st): st.info("Ligue o feed, os stories ou os dois."); return
     ord_ids = list(ids)
     if ordem == "Embaralhar": random.Random(len(ids) + dia0.toordinal()).shuffle(ord_ids)
@@ -182,7 +195,7 @@ def _lote(H, ofertas, fila, fsha):
     feed_ids = [o for o in ord_ids if o not in ja_postado] if usar_feed else []
     agenda = _agendar_por_intervalo(feed_ids, datetime.combine(dia0, hora0), intervalo, jan_ini, jan_fim) if usar_feed else []
     plano = [(o, t.date(), f"{t:%H:%M}") for o, t in agenda]
-    por_dia_st = len(ids) * len(slots_s) if usar_st else 0
+    por_dia_st = (min(por_dia_r, len(ids)) if rot else len(ids) * len(slots_s)) if usar_st else 0
     st.divider(); H.secao("Resumo antes de aplicar")
     r1, r2 = st.columns(2, gap="large")
     nomes = ofertas.set_index("ID")["Produto"]
@@ -201,9 +214,15 @@ def _lote(H, ofertas, fila, fsha):
             if intervalo < timedelta(minutes=60): st.warning("Intervalo menor que 1 hora entre posts do feed não é recomendado.")
     with r2:
         if usar_st:
-            st.markdown(f"**Stories:** {por_dia_st} por dia, todos os dias, até você desmarcar")
-            if usar_st: st.caption(f"{len(ids)} stories em cada um dos {len(slots_s)} horário(s) ({', '.join(slots_s)}), um depois do outro.")
-            if por_dia_st > 30: st.warning("Mais de 30 stories por dia é muito: o Instagram limita 100 publicações por dia pela API e a audiência cansa. Considere menos produtos ou menos horários.")
+            if rot:
+                dias_ciclo = -(-len(ids) // max(1, min(por_dia_r, len(ids))))
+                st.markdown(f"**Stories:** {por_dia_st} por dia, sorteados entre {len(ids)} produtos")
+                st.caption(f"Das {ini_r:%H:%M} até {fim_r:%H:%M}, um a cada {int_r} min. O ciclo completo leva cerca de {dias_ciclo} dia(s); depois recomeça do zero.")
+                if len(ids) < 2 * por_dia_r: st.warning("Com poucos produtos para a quantidade por dia, alguns aparecem em dias seguidos. Selecione mais produtos ou reduza os stories por dia.")
+            else:
+                st.markdown(f"**Stories:** {por_dia_st} por dia, todos os dias, até você desmarcar")
+                st.caption(f"{len(ids)} stories em cada um dos {len(slots_s)} horário(s) ({', '.join(slots_s)}), um depois do outro.")
+            if por_dia_st > 30: st.warning("Mais de 30 stories por dia é muito: o Instagram limita 100 publicações por dia pela API e a audiência cansa.")
     with st.expander("Ver como fica um desses produtos"):
         pid = st.selectbox("Produto", ids, format_func=lambda o: f"{o} · {str(nomes.get(o, o))[:50]}", key="lt_prev")
         wb, _, _, _ = H.contexto(); c = d.dict_da_linha(d.linha_da_oferta(wb, pid)); foto = d.foto(pid); campos = _campos(c)
@@ -215,7 +234,9 @@ def _lote(H, ofertas, fila, fsha):
     if st.button("Salvar e publicar no site", type="primary", disabled=not conf, key="lt_go"):
         for o, d_, h_ in plano:
             fila["feed"][o] = {"status": "aprovado", "agendado_para": f"{d_:%Y-%m-%d}T{h_}", "por": d.EMAIL, "postado_em": None, "link_produto": bool(link)}
-        if usar_st:
+        if usar_st and rot:
+            fila["rotacao"] = {"ativo": True, "produtos": sorted(ord_ids), "por_dia": por_dia_r, "inicio": f"{ini_r:%H:%M}", "intervalo_min": int_r, "link_produto": bool(link), "por": d.EMAIL}
+        elif usar_st:
             for i, o in enumerate(ord_ids):
                 fila["stories"][o] = {"ativo": True, "horarios": list(slots_s), "por": d.EMAIL, "link_produto": bool(link)}
         salvar_fila(fila, fsha, f"lote: {len(plano)} feed e {len(ord_ids) if usar_st else 0} stories")
@@ -235,8 +256,9 @@ def pagina(H):
         with st.container(border=True): H.vazio("image", "Nenhuma oferta aprovada", "Aprove ofertas em “Revisar e enviar” para criar posts.")
         return
     fila, fsha = ler_fila()
-    t1, tl, t2, t3 = st.tabs(["Prévia e aprovação", "Em lote (vários produtos)", f"Agenda do feed ({sum(1 for v in fila['feed'].values() if v.get('status') == 'aprovado' and not v.get('postado_em'))})",
-                          f"Biblioteca de stories ({sum(1 for v in fila['stories'].values() if v.get('ativo'))} ativos)"])
+    t1, tl, t2, t3 = st.tabs(["Prévia e aprovação", "Em lote (vários produtos)",
+                                  f"Agenda do feed ({sum(1 for v in fila['feed'].values() if v.get('status') == 'aprovado' and not v.get('postado_em'))})",
+                                  f"Biblioteca de stories ({sum(1 for v in fila['stories'].values() if v.get('ativo')) + (1 if (fila.get('rotacao') or {}).get('ativo') else 0)} ativos)"])
     with t1:
         esc = st.selectbox("Produto", (ofertas["ID"] + " · " + ofertas["Produto"].str.slice(0, 70)).tolist()); oid = esc.split(" · ")[0]
         c = d.dict_da_linha(d.linha_da_oferta(wb, oid)); foto = d.foto(oid); campos = _campos(c)
@@ -293,8 +315,17 @@ def pagina(H):
                 if not v.get("postado_em") and z.button("Cancelar", key=f"cx_{o}"):
                     del fila["feed"][o]; salvar_fila(fila, fsha, f"feed {o} cancelado"); st.rerun()
     with t3:
+        rt = fila.get("rotacao") or {}
+        if rt.get("ativo"):
+            pl = fila["_publicados"].get("rotacao", {})
+            with st.container(border=True):
+                x, z = st.columns([6, 1.6], vertical_alignment="center")
+                x.markdown(f"**Rotação aleatória:** {rt.get('por_dia')} stories por dia, a partir das {rt.get('inicio')}, a cada {rt.get('intervalo_min')} min · {len(rt.get('produtos', []))} produtos")
+                x.caption(f"Ciclo {pl.get('ciclo', 1)} · {len(pl.get('usados', []))} de {len(rt.get('produtos', []))} já saíram neste ciclo. Quando todos saírem, recomeça sozinho.")
+                if z.button("Desligar rotação", key="rot_off"):
+                    fila["rotacao"]["ativo"] = False; salvar_fila(fila, fsha, "rotacao de stories desligada"); st.rerun()
         itens = sorted((o, v) for o, v in fila["stories"].items() if v.get("ativo"))
-        if not itens:
+        if not itens and not rt.get("ativo"):
             with st.container(border=True): H.vazio("pending_actions", "Nenhum story ativo", "Na aba Prévia, ligue “Postar este story todos os dias” e escolha os horários.")
         for o, v in itens:
             with st.container(border=True):
