@@ -56,8 +56,8 @@ def _b64(jpeg):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _arte(oid, formato, chave, foto, campos, link):
-    return arte.renderizar(dict(campos), foto, formato, mostrar_link=link)
+def _arte(oid, formato, chave, foto, campos, link, capa=None):
+    return arte.renderizar(dict(campos), foto, formato, mostrar_link=link, capa_bytes=capa)
 
 
 def _campos(c):
@@ -225,11 +225,11 @@ def _lote(H, ofertas, fila, fsha):
             if por_dia_st > 30: st.warning("Mais de 30 stories por dia é muito: o Instagram limita 100 publicações por dia pela API e a audiência cansa.")
     with st.expander("Ver como fica um desses produtos"):
         pid = st.selectbox("Produto", ids, format_func=lambda o: f"{o} · {str(nomes.get(o, o))[:50]}", key="lt_prev")
-        wb, _, _, _ = H.contexto(); c = d.dict_da_linha(d.linha_da_oferta(wb, pid)); foto = d.foto(pid); campos = _campos(c)
+        wb, _, _, _ = H.contexto(); c = d.dict_da_linha(d.linha_da_oferta(wb, pid)); foto = d.foto(pid); cp = d.capa(pid); campos = _campos(c)
         chave = hashlib.md5(repr((campos, bool(foto))).encode()).hexdigest()
         p1, p2 = st.columns(2)
-        p1.html(previa_feed(_arte(pid, "feed", chave, foto, campos, link), arte.legenda(c, link_produto=link)))
-        p2.html(previa_stories(_arte(pid, "stories", chave, foto, campos, link), True))
+        p1.html(previa_feed(_arte(pid, "feed", chave, foto, campos, link, cp), arte.legenda(c, link_produto=link)))
+        p2.html(previa_stories(_arte(pid, "stories", chave, foto, campos, link, cp), True))
     conf = st.checkbox(f"Confirmo: {len(plano)} post(s) no feed e {por_dia_st} story(ies) por dia serão publicados sozinhos nos horários marcados", key="lt_conf")
     if st.button("Salvar e publicar no site", type="primary", disabled=not conf, key="lt_go"):
         for o, d_, h_ in plano:
@@ -262,11 +262,11 @@ def pagina(H):
                                   f"Biblioteca de stories ({sum(1 for v in fila['stories'].values() if v.get('ativo')) + (1 if (fila.get('rotacao') or {}).get('ativo') else 0)} ativos)"])
     with t1:
         esc = st.selectbox("Produto", (ofertas["ID"] + " · " + ofertas["Produto"].str.slice(0, 70)).tolist()); oid = esc.split(" · ")[0]
-        c = d.dict_da_linha(d.linha_da_oferta(wb, oid)); foto = d.foto(oid); campos = _campos(c)
+        c = d.dict_da_linha(d.linha_da_oferta(wb, oid)); foto = d.foto(oid); cp = d.capa(oid); campos = _campos(c)
         chave = hashlib.md5(repr((campos, bool(foto))).encode()).hexdigest()
         if not foto: st.warning("Esta oferta não tem foto: a arte sai sem imagem do produto.")
         link = st.toggle("Mostrar também o link do produto (padrão: só “link na bio”)", value=False, help="O Instagram não deixa o link clicável no feed nem nos stories postados pela rotina: ele aparece escrito, para a pessoa copiar ou digitar. O link clicável é o da bio.")
-        feed_jpg = _arte(oid, "feed", chave, foto, campos, link); st_jpg = _arte(oid, "stories", chave, foto, campos, link)
+        feed_jpg = _arte(oid, "feed", chave, foto, campos, link, cp); st_jpg = _arte(oid, "stories", chave, foto, campos, link, cp)
         a, b = st.columns([1, 1], gap="large")
         with a:
             H.secao("Feed (4:5)", "Como aparece no perfil e no feed dos seguidores")

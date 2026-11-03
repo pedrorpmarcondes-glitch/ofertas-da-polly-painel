@@ -1,14 +1,20 @@
-"""Arte dos posts do Instagram (feed 4:5 e stories 9:16) em rosa e preto, feita com Pillow.
+"""Arte dos posts do Instagram (feed 4:5 e stories 9:16) no estilo Pinterest rosa e preto, feita com Pillow.
 
 Usada pelo painel (previa) e pela rotina que publica: o que a Polly aprova na previa e o que vai ao ar sao
-o mesmo arquivo. Nao depende de fonte instalada: usa a fonte vetorial embutida no Pillow.
+o mesmo arquivo. Duas formas:
+- capa (estilo "capa A"): foto da modelo em tela cheia com o produto, frase amarela, faixa branca e estrelas.
+  Usada quando existe imagens/capa-<ID>.jpg.
+- produto: fundo rosa claro, foto do produto num cartao branco e o preco. Usada quando nao ha foto da modelo.
+Fontes livres (SIL OFL) na pasta fonts: Poppins, Playfair Display Italic e Great Vibes.
 """
 import io
+import math
 import re
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
-PRETO, ROSA, ROSA_CLARO, BRANCO = (10, 5, 8), (255, 45, 143), (255, 194, 224), (255, 255, 255)
+AMARELO, BRANCO, ROSA, ROSA_CLARO, CREME = (255, 232, 150), (255, 255, 255), (255, 120, 178), (255, 206, 228), (255, 247, 232)
+VINHO, ROSA_FORTE, FUNDO_ROSA, ESCURO = (120, 30, 70), (190, 50, 110), (253, 233, 240), (26, 6, 16)
 TAMANHOS = {"feed": (1080, 1350), "stories": (1080, 1920)}
 # Stories: o Instagram cobre o topo (perfil) e a base (resposta). Nada importante nessas faixas.
 SEGURO_TOPO, SEGURO_BASE = 250, 340
@@ -17,18 +23,29 @@ HASHTAGS = {"Beleza": "#beleza #skincare #cuidadoscomapele", "Casa e Cozinha": "
             "Organização e Limpeza": "#organizacao #limpeza #casaorganizada", "Natal e Decoração": "#natal #decoracao #decoracaodenatal",
             "Fitness e Esportes": "#fitness #treino #esportes"}
 BASE_TAGS = "#ofertas #achadinhos #promocao #ofertasdapolly"
+# Frase da capa por categoria: (linha amarela, linha branca). A faixa do meio vem dos vendidos ou do preco.
+FRASES = {"Beleza": ("o queridinho", "pro seu skincare"), "Casa e Cozinha": ("o achadinho", "pra sua cozinha"),
+          "Moda": ("o achadinho", "pro seu look"), "Eletrônicos": ("o achadinho", "que facilita a vida"),
+          "Organização e Limpeza": ("o achadinho", "pra casa organizada"), "Natal e Decoração": ("o achadinho", "pro seu natal"),
+          "Fitness e Esportes": ("o achadinho", "pro seu treino")}
+ASSUNTO = {"Beleza": "achadinho de beleza", "Casa e Cozinha": "achadinho de casa", "Moda": "achadinho de moda",
+           "Eletrônicos": "achadinho de tecnologia", "Organização e Limpeza": "achadinho de organização",
+           "Natal e Decoração": "achadinho de natal", "Fitness e Esportes": "achadinho fitness"}
+
+FONTES = Path(__file__).resolve().parent / "fonts"
+_ARQ = {"forte": "Poppins-Bold.ttf", "media": "Poppins-SemiBold.ttf", "leve": "Poppins-Medium.ttf",
+        "serifa": "PlayfairDisplay-Italic.ttf", "cursiva": "GreatVibes-Regular.ttf"}
 
 
-FONTES = Path(__file__).resolve().parent / "fonts"  # Liberation Sans (SIL OFL): tem acentos do portugues
-
-
-def _fonte(tamanho, negrito=True):
-    try: return ImageFont.truetype(str(FONTES / ("LiberationSans-Bold.ttf" if negrito else "LiberationSans-Regular.ttf")), tamanho)
-    except OSError: return ImageFont.load_default(size=tamanho)
+def _fonte(tamanho, tipo="forte"):
+    for nome in (_ARQ.get(tipo), "LiberationSans-Bold.ttf"):
+        try: return ImageFont.truetype(str(FONTES / nome), tamanho)
+        except (OSError, TypeError): pass
+    return ImageFont.load_default(size=tamanho)
 
 
 def _sem_emoji(txt):
-    """A fonte embutida nao tem emoji: na imagem vai so o texto; a legenda do post mantem os emojis."""
+    """As fontes nao tem emoji: na imagem vai so o texto; a legenda do post mantem os emojis."""
     return re.sub(r"[^\w\s.,!?:;%$&()\-/+'\"°ªº@#]", "", str(txt or ""), flags=re.UNICODE).strip()
 
 
@@ -46,6 +63,23 @@ def preco_texto(v):
     return _brl(float(s))
 
 
+def link_curto(c):
+    """Link do produto sem o https://, para caber na arte e ser digitado."""
+    return re.sub(r"^https?://", "", str(c.get("I") or "")).strip("/")
+
+
+def _vendidos(c):
+    """'+80 mil vendidos' quando a chamada da planilha traz esse numero."""
+    m = re.search(r"\+\s?([\d.,]+)\s?(MIL|K)\s+VENDID", str(c.get("R") or ""), re.I)
+    return f"+{m.group(1)} mil vendidos" if m else ""
+
+
+def _nome_curto(c):
+    """Nome do produto sem o detalhe depois da virgula ou do traco: cabe em duas linhas."""
+    n = re.split(r",| - | – | \| ", _sem_emoji(c.get("B")))[0].strip()
+    return n.lower() if n.isupper() or len(n) > 18 else n
+
+
 def _quebrar(draw, texto, fonte, largura, max_linhas):
     palavras, linhas, atual = texto.split(), [], ""
     for p in palavras:
@@ -60,85 +94,146 @@ def _quebrar(draw, texto, fonte, largura, max_linhas):
     return linhas
 
 
-def _negrito(draw, xy, texto, fonte, cor, forca=0, **kw):
-    draw.text(xy, texto, font=fonte, fill=cor, **kw)
+def _cabe(texto, tipo, tam, largura, minimo=30):
+    while tam > minimo and _fonte(tam, tipo).getlength(texto) > largura: tam -= 2
+    return _fonte(tam, tipo)
 
 
-def _fundo(w, h):
-    base = Image.new("RGB", (w, h), PRETO)
-    lado = int(w * 1.4)
-    brilho = Image.radial_gradient("L").resize((lado, lado)).point(lambda v: max(0, 255 - int(v * 1.45)))
-    mascara = Image.new("L", (w, h), 0); mascara.paste(brilho, (int(-w * 0.2), int(-w * 0.5)))
-    base.paste(Image.new("RGB", (w, h), (92, 15, 58)), (0, 0), mascara)
-    return base
+# ------------------------------------------------------------------ pecas
+def _texto(im, xy, t, f, cor, sombra=70, sp=0):
+    """Texto centralizado em x com sombra macia e letras mais juntas (sp<0), como nas referencias."""
+    larg = sum(f.getlength(ch) + sp for ch in t) - sp
+    cam = Image.new("RGBA", im.size, (0, 0, 0, 0)); som = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    dc, ds = ImageDraw.Draw(cam), ImageDraw.Draw(som); x, y = xy[0] - larg / 2, xy[1]
+    for ch in t:
+        if sombra: ds.text((x, y + 3), ch, font=f, fill=(50, 10, 30, sombra), anchor="lm")
+        dc.text((x, y), ch, font=f, fill=cor, anchor="lm"); x += f.getlength(ch) + sp
+    if sombra:
+        som = som.filter(ImageFilter.GaussianBlur(7)); im.paste(som, (0, 0), som)
+    im.paste(cam, (0, 0), cam)
+    return larg
 
 
-def _cartao(base, foto_bytes, caixa):
-    x0, y0, x1, y1 = caixa; w, h = x1 - x0, y1 - y0
-    sombra = Image.new("RGBA", (w + 120, h + 120), (0, 0, 0, 0))
-    ImageDraw.Draw(sombra).rounded_rectangle((60, 70, w + 60, h + 70), 44, fill=(0, 0, 0, 150))
-    base.paste(sombra.filter(ImageFilter.GaussianBlur(26)), (x0 - 60, y0 - 60), sombra.filter(ImageFilter.GaussianBlur(26)))
-    cartao = Image.new("RGB", (w, h), BRANCO)
-    if foto_bytes:
-        im = Image.open(io.BytesIO(foto_bytes)).convert("RGB")
-        im.thumbnail((w - 60, h - 60), Image.LANCZOS)
-        cartao.paste(im, ((w - im.width) // 2, (h - im.height) // 2))
-    mascara = Image.new("L", (w, h), 0); ImageDraw.Draw(mascara).rounded_rectangle((0, 0, w, h), 44, fill=255)
-    base.paste(cartao, (x0, y0), mascara)
-    ImageDraw.Draw(base).rounded_rectangle((x0, y0, x1, y1), 44, outline=ROSA, width=6)
+def _estrela(im, cx, cy, r, cor, rot=-10):
+    ss = 3; lado = int(r * 2.4) * ss; c = Image.new("RGBA", (lado, lado), (0, 0, 0, 0)); o = lado / 2; p = []
+    for k in range(10):
+        a = math.radians(rot - 90 + k * 36); q = (r if k % 2 == 0 else r * .45) * ss; p.append((o + q * math.cos(a), o + q * math.sin(a)))
+    ImageDraw.Draw(c).polygon(p, fill=cor + (255,)); c = c.resize((lado // ss,) * 2, Image.LANCZOS)
+    im.paste(c, (int(cx - c.width / 2), int(cy - c.height / 2)), c)
 
 
-def link_curto(c):
-    """Link do produto sem o https://, para caber na arte e ser digitado."""
-    return re.sub(r"^https?://", "", str(c.get("I") or "")).strip("/")
+def _assinatura(im, y, tam=210, alfa=150, cor=ROSA_CLARO):
+    """'achadinhos' em letra cursiva, grande e cortada nas bordas."""
+    c = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(c).text((im.width / 2, y), "achadinhos", font=_fonte(tam, "cursiva"), fill=cor + (alfa,), anchor="mm")
+    im.paste(c, (0, 0), c)
 
 
-def renderizar(c, foto_bytes, formato="feed", cta=None, mostrar_link=False):
-    """c: dict com as colunas da planilha (B produto, E preco, R chamada, C categoria). Devolve bytes JPEG."""
-    w, h = TAMANHOS[formato]; im = _fundo(w, h); d = ImageDraw.Draw(im)
-    nome = _sem_emoji(c.get("B")); chamada = re.split(r"(?<=[!?])\s", _sem_emoji(c.get("R")))[0]  # so a 1a frase: nunca corta no meio
-    selo = _fonte(34)
-    if formato == "feed":
-        topo, cartao_h = 60, 560
-        d.rounded_rectangle((60, topo, 60 + d.textlength("OFERTA DA POLLY", font=selo) + 70, topo + 76), 38, fill=ROSA)
-        _negrito(d, (95, topo + 17), "OFERTA DA POLLY", selo, BRANCO)
-        _cartao(im, foto_bytes, (90, 170, 990, 170 + cartao_h))
-        y = 170 + cartao_h + 50
-    else:
-        topo = SEGURO_TOPO + 10
-        d.rounded_rectangle((60, topo, 60 + d.textlength("OFERTA DA POLLY", font=selo) + 70, topo + 76), 38, fill=ROSA)
-        _negrito(d, (95, topo + 17), "OFERTA DA POLLY", selo, BRANCO)
-        _cartao(im, foto_bytes, (90, topo + 120, 990, topo + 120 + 520))
-        y = topo + 120 + 520 + 40
-    f_nome = _fonte(50)
-    for linha in _quebrar(d, nome, f_nome, 940, 2):
-        _negrito(d, (70, y), linha, f_nome, BRANCO); y += 60
-    y += 14
-    _negrito(d, (70, y), "por apenas", _fonte(34, False), BRANCO); y += 44
-    preco, tam = preco_texto(c.get("E")), 112
-    while tam > 40 and d.textlength(preco, font=_fonte(tam)) > 940: tam -= 4  # faixas de preco ("R$ 23,99 a R$ 74,99") ficam menores
-    _negrito(d, (70, y + (112 - tam) // 2), preco, _fonte(tam), ROSA_CLARO); y += 130
-    if chamada and formato == "feed" and y < h - 190:
-        for linha in _quebrar(d, chamada, _fonte(32, False), 940, 2):
-            _negrito(d, (70, y), linha, _fonte(32, False), BRANCO); y += 42
-    if formato == "feed":
-        if mostrar_link and link_curto(c):
-            fl = _fonte(34); lt = "link do produto: " + link_curto(c)
-            d.text(((w - d.textlength(lt, font=fl)) / 2, h - 135), lt, font=fl, fill=BRANCO)
-        rod = "LINK NA BIO  ·  @ofertasdapolly_"
-        d.text(((w - d.textlength(rod, font=_fonte(30))) / 2, h - 72), rod, font=_fonte(30), fill=ROSA_CLARO)
-    else:
-        txt = cta or "TOQUE NO LINK DA BIO"; f = _fonte(50); ty = 1330 if mostrar_link else h - SEGURO_BASE - 150
-        d.rounded_rectangle((90, ty, 990, ty + 120), 60, fill=ROSA)
-        _negrito(d, ((w - d.textlength(txt, font=f)) / 2, ty + 33), txt, f, BRANCO)
-        yy = ty + 140
-        if mostrar_link and link_curto(c):
-            fl = _fonte(46); lt = "ou digite: " + link_curto(c)
-            d.text(((w - d.textlength(lt, font=fl)) / 2, yy), lt, font=fl, fill=BRANCO); yy += 64
-        rod = "entre na comunidade e escolha seus grupos"; fr = _fonte(32, False)
-        d.text(((w - d.textlength(rod, font=fr)) / 2, yy), rod, font=fr, fill=ROSA_CLARO)
-    buf = io.BytesIO(); im.save(buf, "JPEG", quality=92, subsampling=0)
+def _traco(im, y, larg, cor=ROSA_CLARO):
+    d = ImageDraw.Draw(im); w = im.width
+    d.rectangle(((w - larg) / 2, y, (w + larg) / 2, y + 5), fill=cor); d.rectangle(((w - larg) / 2 + 60, y + 13, (w + larg) / 2 - 60, y + 16), fill=cor)
+
+
+def _faixa(im, cy, t):
+    """Faixa branca com fundo rosinha e dois alfinetes, como na referencia."""
+    f = _cabe(t.upper(), "leve", 40, 760); w = f.getlength(t.upper()) + 160; h = 98; cx = im.width // 2
+    som = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(som).rounded_rectangle((cx - w / 2, cy - h / 2 + 7, cx + w / 2, cy + h / 2 + 7), 26, fill=(50, 10, 30, 90))
+    som = som.filter(ImageFilter.GaussianBlur(12)); im.paste(som, (0, 0), som)
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 26, fill=BRANCO)
+    d.rounded_rectangle((cx - w / 2 + 14, cy - h / 2 + 14, cx + w / 2 - 14, cy + h / 2 - 14), 12, fill=(255, 233, 242))
+    for lx in (cx - w / 2 + 36, cx + w / 2 - 36):
+        d.line((lx, cy - 20, lx, cy + 20), fill=VINHO, width=4); d.ellipse((lx - 6, cy - 26, lx + 6, cy - 14), fill=VINHO)
+    d.text((cx, cy), t.upper(), font=f, fill=(70, 40, 55), anchor="mm")
+    return w
+
+
+def _degrade(im, inicio, forca=205):
+    w, h = im.size; m = Image.new("L", (1, h), 0)
+    for y in range(h):
+        t = max(0, (y - inicio) / max(1, h - inicio)); m.putpixel((0, y), int(forca * min(1, t * 1.5) ** 1.3))
+    im.paste(Image.new("RGB", (w, h), ESCURO), (0, 0), m.resize((w, h)))
+
+
+def _botao(im, y, t):
+    d = ImageDraw.Draw(im); f = _cabe(t, "forte", 50, 780)
+    d.rounded_rectangle((90, y, 990, y + 120), 60, fill=ROSA_FORTE)
+    d.text((im.width / 2, y + 60), t, font=f, fill=BRANCO, anchor="mm")
+
+
+def _jpeg(im):
+    buf = io.BytesIO(); im.convert("RGB").save(buf, "JPEG", quality=92, subsampling=0)
     return buf.getvalue()
+
+
+# ------------------------------------------------------------------ capa (foto da modelo)
+def _capa(c, capa_bytes, formato, cta, mostrar_link):
+    w, h = TAMANHOS[formato]
+    im = ImageOps.fit(Image.open(io.BytesIO(capa_bytes)).convert("RGB"), (w, h), Image.LANCZOS, centering=(.5, .1))
+    im = ImageEnhance.Color(ImageEnhance.Brightness(im).enhance(1.05)).enhance(1.05)
+    base = h - 470 if formato == "feed" else h - SEGURO_BASE - 420
+    _degrade(im, base - 200)
+    for x, y, r in [(90, 150, 26), (980, 120, 20), (830, 250, 16), (70, 430, 18), (1000, 520, 24)]:
+        _estrela(im, x, y + (0 if formato == "feed" else SEGURO_TOPO), r, BRANCO)
+    if formato == "feed": _assinatura(im, h - 70)
+    l1, l2 = FRASES.get(c.get("C"), ("o achadinho", "que você precisa ter"))
+    faixa = f"com {_vendidos(c)}" if _vendidos(c) else f"por {preco_texto(c.get('E'))}"
+    _texto(im, (w / 2, base + 15), l1, _cabe(l1, "forte", 74, 900), AMARELO, sp=-3)
+    _faixa(im, base + 125, faixa)
+    _texto(im, (w / 2, base + 235), l2, _cabe(l2, "forte", 74, 900), BRANCO, sp=-3)
+    _traco(im, base + 295, 520)
+    _estrela(im, w / 2 + 455, base - 60, 44, ROSA); _estrela(im, w / 2 - 385, base + 225, 44, ROSA, rot=8)
+    if formato == "feed":
+        if mostrar_link and link_curto(c):
+            _texto(im, (w / 2, h - 150), "link do produto: " + link_curto(c), _cabe("link do produto: " + link_curto(c), "media", 30, 960, 18), BRANCO, sombra=120)
+    else:
+        rodape = cta or "toque no link da bio"
+        if mostrar_link and link_curto(c): rodape = "ou digite: " + link_curto(c)
+        _texto(im, (w / 2, base + 375), rodape, _cabe(rodape, "media", 40, 960, 20), ROSA_CLARO, sombra=120)
+    return _jpeg(im)
+
+
+# ------------------------------------------------------------------ produto (sem foto da modelo)
+def _produto(c, foto_bytes, formato, cta, mostrar_link):
+    w, h = TAMANHOS[formato]; im = Image.new("RGB", (w, h), FUNDO_ROSA); d = ImageDraw.Draw(im)
+    topo = 70 if formato == "feed" else SEGURO_TOPO + 20
+    for x, y, r in [(90, 30, 22), (1000, 10, 16), (980, 200, 26), (60, 380, 16)]: _estrela(im, x, topo + y, r, BRANCO)
+    if formato == "feed": _assinatura(im, h - 110, tam=230, alfa=120)
+    f_nome = _fonte(62, "forte"); y = topo + 40
+    for linha in _quebrar(d, _nome_curto(c), f_nome, 940, 2):
+        _texto(im, (w / 2, y), linha, f_nome, VINHO, sombra=0, sp=-2); y += 74
+    sub = _vendidos(c) or ASSUNTO.get(c.get("C"), "achadinho do dia")
+    _texto(im, (w / 2, y + 6), sub, _fonte(60, "serifa"), ROSA_FORTE, sombra=0); y += 70
+    by = h - SEGURO_BASE - 150 - (64 if mostrar_link and link_curto(c) else 0)  # botao do stories
+    cw = 800; ch = (h - 330 - y - 40) if formato == "feed" else (by - 190 - (y + 20)); cx0, cy0 = (w - cw) // 2, y + 20
+    som = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(som).rounded_rectangle((cx0, cy0 + 12, cx0 + cw, cy0 + ch + 12), 46, fill=ROSA_FORTE + (80,))
+    som = som.filter(ImageFilter.GaussianBlur(24)); im.paste(som, (0, 0), som)
+    d.rounded_rectangle((cx0, cy0, cx0 + cw, cy0 + ch), 46, fill=BRANCO)
+    if foto_bytes:
+        p = Image.open(io.BytesIO(foto_bytes)).convert("RGB"); p.thumbnail((cw - 80, ch - 80), Image.LANCZOS)
+        im.paste(p, ((w - p.width) // 2, cy0 + (ch - p.height) // 2))
+    _estrela(im, cx0 + cw - 10, cy0 + 20, 62, ROSA); _estrela(im, cx0 + 5, cy0 + ch - 30, 50, ROSA, rot=12)
+    y = cy0 + ch + 90; preco = preco_texto(c.get("E"))
+    _texto(im, (w / 2, y), preco, _cabe(preco, "forte", 96, 940, 40), ROSA_FORTE, sombra=0, sp=-3)
+    if formato == "feed":
+        if mostrar_link and link_curto(c):
+            lt = "link do produto: " + link_curto(c); _texto(im, (w / 2, h - 165), lt, _cabe(lt, "media", 30, 960, 18), VINHO, sombra=0)
+        _texto(im, (w / 2, h - 50), "LINK NA BIO  ·  @ofertasdapolly_", _fonte(28, "media"), VINHO, sombra=0)
+    else:
+        _botao(im, by, (cta or "toque no link da bio").upper()); yy = by + 160
+        if mostrar_link and link_curto(c):
+            lt = "ou digite: " + link_curto(c); _texto(im, (w / 2, yy), lt, _cabe(lt, "media", 40, 960, 20), VINHO, sombra=0); yy += 60
+        _texto(im, (w / 2, yy), "entre na comunidade e escolha seus grupos", _fonte(30, "leve"), VINHO, sombra=0)
+    return _jpeg(im)
+
+
+def renderizar(c, foto_bytes, formato="feed", cta=None, mostrar_link=False, capa_bytes=None):
+    """c: dict com as colunas da planilha (B produto, E preco, R chamada, C categoria). Devolve bytes JPEG.
+    capa_bytes: foto da modelo com o produto (imagens/capa-<ID>.jpg); sem ela, sai o slide de produto."""
+    if capa_bytes: return _capa(c, capa_bytes, formato, cta, mostrar_link)
+    return _produto(c, foto_bytes, formato, cta, mostrar_link)
 
 
 def legenda(c, link_bio="Link na bio 👆 (entre na comunidade e escolha seus grupos)", link_produto=False):

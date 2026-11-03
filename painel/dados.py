@@ -189,6 +189,13 @@ def foto(oid):
     except Exception: return None
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def capa(oid):
+    """Foto da modelo com o produto (capa do Instagram). A maioria dos produtos ainda nao tem."""
+    try: return ler(f"imagens/capa-{oid}.jpg", binario=True)[0]
+    except Exception: return None
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def foto_mini(oid, lado=96):
     """Miniatura em data URI para tabelas e cartões (leve, sem depender de caminho local)."""
