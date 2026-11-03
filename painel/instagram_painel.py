@@ -240,7 +240,8 @@ def _lote(H, ofertas, fila, fsha):
             for i, o in enumerate(ord_ids):
                 fila["stories"][o] = {"ativo": True, "horarios": list(slots_s), "por": d.EMAIL, "link_produto": bool(link)}
         salvar_fila(fila, fsha, f"lote: {len(plano)} feed e {len(ord_ids) if usar_st else 0} stories")
-        st.session_state["lt_conf"] = False; st.toast("Lote agendado"); st.rerun()
+        # A caixa ja foi desenhada nesta execucao: o Streamlit nao deixa atribuir valor a ela, so apagar o estado.
+        st.session_state.pop("lt_conf", None); st.toast("Lote agendado"); st.rerun()
 
 
 # ------------------------------------------------------------------ pagina
