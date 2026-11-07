@@ -366,8 +366,8 @@ TEMPLATES = {"modelo-mensagem.txt": ("Mensagem da oferta", {"chamada", "produto"
              "modelo-boasvindas.txt": ("Boas-vindas (Avisos)", set(), set()),
              "modelo-destaque.txt": ("Destaque do dia (Avisos)", {"chamada", "produto", "preco", "link", "categoria", "link_grupo"}, {"link"}),
              "modelo-enquete.txt": ("Pergunta da enquete (Avisos)", set(), set())}
-EXEMPLO = {"chamada": "🔥 40% OFF! Corre que acaba.", "produto": "Kit 3 Toalhas de Banho", "preco": "R$ 49,90 (antes: R$ 79,90)", "cupom": "CUPOM-EXEMPLO", "validade": "",
-           "loja": "Shopee", "link": "https://s.shopee.com.br/exemplo", "categoria": "Casa e Cozinha", "link_grupo": "https://chat.whatsapp.com/exemplo"}
+EXEMPLO = {"chamada": "🔥 40% OFF! Corre que acaba.", "produto": "Kit 3 Toalhas de Banho", "preco": "De R$ 79,90 Por R$ 49,90", "cupom": "CUPOM-EXEMPLO", "validade": "",
+           "loja": "na Shopee", "link": "https://s.shopee.com.br/exemplo", "categoria": "Casa e Cozinha", "link_grupo": "https://chat.whatsapp.com/exemplo"}
 
 
 def validar_template(nome, texto):

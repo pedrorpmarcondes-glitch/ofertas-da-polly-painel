@@ -64,6 +64,7 @@ def validar(c, cfg, grupos):
     if como_data(c["K"]) is None: return "data da conferência ilegível"
     if not str(c["I"]).startswith("https://"): return "link inválido"
     if c["C"] not in grupos: return "categoria sem grupo configurado"
+    if fora_do_publico(c): return "fora do público (produto sem apelo para o público feminino)"
     return None
 
 # % de comissão usado para priorizar. Amazon: tabela oficial por categoria (06/11/2026). Shopee e Mercado Livre
@@ -82,7 +83,10 @@ def ganho_estimado(c):
         loja = c.get("D") or ""
         pct = COMISSAO_PADRAO.get(loja, {}).get(c.get("C")) if isinstance(COMISSAO_PADRAO.get(loja), dict) else None
         pct = pct or COMISSAO_PADRAO.get(loja + "*", 7)
-    return preco * pct / 100
+    ganho = preco * pct / 100
+    if DESEJO.search(str(c.get("B") or "")): ganho *= 1.5  # o que o público feminino mais quer: beleza, perfume, cozinha, casa
+    if re.search(r"masculin", str(c.get("B") or ""), re.I): ganho *= 0.5
+    return ganho
 
 # Chamada padrão (time de copy, 06/11/2026). Regra do dono: nunca citar nota, estrelas ou quantidade vendida.
 CHAMADAS = {
@@ -122,11 +126,41 @@ def chamada_padrao(c, vez=None):
     modelos = com if pct >= 5 else sem
     return modelos[vez % len(modelos)].format(nome=nome_curto(c.get("B")), pct=pct)
 
+# Público da Polly é feminino (decisão do dono, 06/11/2026): nada de peça, ferramenta, item de carro/moto,
+# material elétrico, cabo/carregador simples, limpeza pesada ou produto só masculino.
+FORA_DO_PUBLICO = re.compile(r"\b(" + "|".join([
+    r"parafusos?", r"p[ée]s? parafuso", r"bandeja de evapora", r"mangueira entrada", r"torneira tanque", r"fechadura",
+    r"furadeira", r"parafusadeira", r"maleta de ferramentas", r"caixa para ferramentas", r"alicate", r"chave de fenda",
+    r"pilhas?", r"carregador de (pilhas|baterias?)", r"bateria 12v", r"bulbo", r"e27", r"g9", r"halopim", r"l[âa]mpadas? (led|philips)",
+    r"adaptador de tomada", r"benjamim", r"extens[ãa]o el[ée]trica", r"filtro de linha", r"compressor", r"inflador", r"pneu",
+    r"moto", r"bicicleta", r"bike", r"selim", r"fita veda", r"veda (trinca|fresta|porta)", r"vassouras?", r"rodo", r"piaçava",
+    r"rastelo", r"cabo (mop|alum[íi]nio)", r"reposi[çc][ãa]o", r"flanelas?", r"automotiv[oa]", r"soprador", r"lavadora alta press[ãa]o",
+    r"whey", r"halteres?", r"anilhas?", r"kettlebell", r"chuteiras?", r"meião", r"kimono", r"jiu.?jitsu", r"barbeador", r"barbear",
+    r"barba", r"grecin", r"homme", r"cuecas?(?! meia)", r"carteira masculina", r"cal[çc]a masculina", r"jaqueta masculina",
+    r"bermudas? masculinas?", r"camisetas? (b[áa]sicas? )?masculinas?", r"pulseiras masculinas", r"t[êe]nis masculino(?! feminino)",
+    r"kit (\d+ )?cabos?", r"cabo (tipo|usb|carregador|adaptador)", r"carregador (turbo|iphone|de carro|retr[áa]til|tipo)",
+    r"kit carregador", r"cart[ãa]o de mem[óo]ria", r"teclado", r"mouse", r"c[âa]mera l[âa]mpada", r"ra[çc][ãa]o", r"areia (sanit|higi)",
+]) + r")\b", re.I)
+
+def fora_do_publico(c):
+    nome = str(c.get("B") or "")
+    if re.search(r"\bcuecas?\b", nome, re.I) and re.search(r"calcinha", nome, re.I): nome = re.sub(r"cuecas?", "", nome, flags=re.I)
+    if re.search(r"feminin[oa]|espelho|\bmop\b", nome, re.I) and not re.search(r"masculin|cueca", nome, re.I): return False
+    return bool(FORA_DO_PUBLICO.search(nome))
+
+DESEJO = re.compile(r"perfume|col[ôo]nia|body splash|creme|hidrata|s[ée]rum|maquiagem|batom|gloss|base |corretivo|rímel|m[áa]scara (capilar|de (tratamento|nutri|hidrata|c[íi]lios))|"
+                    r"skincare|protetor solar|[óo]leo (capilar|corporal)|leave.?in|shampoo|esmalte|unhas|c[íi]lios|secador|chapinha|escova (alisadora|secadora|rotativa)|"
+                    r"panela|air ?fryer|fritadeira|utens[íi]lios|potes?|garrafa t[ée]rmica|copo|x[íi]caras?|jogo de|organizador|lou[çc]a|cafeteira|liquidificador|mixer|"
+                    r"len[çc]ol|toalha|manta|almofada|vela|difusor|lumin[áa]ria|espelho|bolsa|vestido|conjunto feminino|sand[áa]lia|joia|colar|brinco", re.I)
+
 def mensagem(c, cfg):
     """Monta a mensagem a partir de modelo-mensagem.txt. Linha com campo vazio é omitida."""
     val = como_data(c.get("H"))
-    campos = {"produto": c["B"], "preco": preco_txt(c["E"]) + (f" (antes: {brl(c['F'])})" if c.get("F") not in (None, "") else ""),
-              "chamada": c.get("R") or "", "cupom": c.get("G") or "", "validade": f"{val:%d/%m/%Y %H:%M}" if val else "", "loja": c["D"], "link": c["I"]}
+    preco = preco_txt(c["E"])
+    if c.get("F") not in (None, ""): preco = f"De {brl(c['F'])} Por {preco}"
+    loja = {"Amazon": "na Amazon", "Shopee": "na Shopee", "Mercado Livre": "no Mercado Livre", "TikTok Shop": "no TikTok Shop"}.get(c["D"], f"em {c['D']}")
+    campos = {"produto": c["B"], "preco": preco, "chamada": c.get("R") or "", "cupom": c.get("G") or "",
+              "validade": f"{val:%d/%m/%Y %H:%M}" if val else "", "loja": loja, "link": c["I"]}
     saida = []
     for linha in (AQUI / "modelo-mensagem.txt").read_text().splitlines():
         usados = re.findall(r"{(\w+)}", linha)
@@ -255,10 +289,14 @@ def main():
     if not (por_grupo and not a.oferta):
         prontas.sort(key=lambda x: estado.get(str(x[0]["A"]), ""))  # quem foi enviado há mais tempo vai primeiro
     if por_grupo:
-        usados, sel = {}, []
+        usados, tipos, sel, sobra = {}, {}, [], []
         for c, m in prontas:
-            usados[c["C"]] = usados.get(c["C"], 0) + 1
-            if usados[c["C"]] <= por_grupo: sel.append((c, m))
+            if usados.get(c["C"], 0) >= por_grupo: continue
+            tipo = (c["C"], (re.findall(r"[a-zà-ú]{3,}", str(c.get("B") or "").lower()) or [""])[0 if not str(c.get("B") or "").lower().startswith("kit") else -1])
+            if tipos.get(tipo, 0) >= 3: sobra.append((c, m)); continue  # variedade: no máximo 3 do mesmo tipo por grupo/dia
+            tipos[tipo] = tipos.get(tipo, 0) + 1; usados[c["C"]] = usados.get(c["C"], 0) + 1; sel.append((c, m))
+        for c, m in sobra:  # completa o grupo se faltou variedade
+            if usados.get(c["C"], 0) < por_grupo: usados[c["C"]] = usados.get(c["C"], 0) + 1; sel.append((c, m))
         prontas = sel
     prontas = prontas[:limite]
     vez_grupo = {}
