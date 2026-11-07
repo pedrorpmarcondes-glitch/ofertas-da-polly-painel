@@ -69,9 +69,8 @@ def link_curto(c):
 
 
 def _vendidos(c):
-    """'+80 mil vendidos' quando a chamada da planilha traz esse numero."""
-    m = re.search(r"\+\s?([\d.,]+)\s?(MIL|K)\s+VENDID", str(c.get("R") or ""), re.I)
-    return f"+{m.group(1)} mil vendidos" if m else ""
+    """Desligado (06/11/2026): por decisão do dono, a arte não mostra quantidade vendida nem nota."""
+    return ""
 
 
 def _nome_curto(c):

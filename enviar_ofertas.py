@@ -66,6 +66,62 @@ def validar(c, cfg, grupos):
     if c["C"] not in grupos: return "categoria sem grupo configurado"
     return None
 
+# % de comissão usado para priorizar. Amazon: tabela oficial por categoria (06/11/2026). Shopee e Mercado Livre
+# variam por produto: use a coluna S ("Comissão %") quando souber; sem ela, vale o padrão da loja.
+COMISSAO_PADRAO = {"Amazon": {"Beleza": 13, "Moda": 11}, "Amazon*": 8, "Shopee*": 8, "Mercado Livre*": 8}
+PRECO_TETO_IMPULSO = 250  # acima disso quase ninguém compra pelo WhatsApp: perde prioridade
+
+def ganho_estimado(c):
+    """Comissão estimada por venda (R$) = preço (limitado ao teto de impulso) x % de comissão."""
+    try: preco = faixa(c["E"])[0]
+    except (TypeError, ValueError): return 0.0
+    if preco > PRECO_TETO_IMPULSO: preco = PRECO_TETO_IMPULSO ** 2 / preco  # mais caro = compra menos por impulso
+    try: pct = float(str(c.get("S")).replace("%", "").replace(",", ".")) if c.get("S") not in (None, "") else None
+    except ValueError: pct = None
+    if pct is None:
+        loja = c.get("D") or ""
+        pct = COMISSAO_PADRAO.get(loja, {}).get(c.get("C")) if isinstance(COMISSAO_PADRAO.get(loja), dict) else None
+        pct = pct or COMISSAO_PADRAO.get(loja + "*", 7)
+    return preco * pct / 100
+
+# Chamada padrão (time de copy, 06/11/2026). Regra do dono: nunca citar nota, estrelas ou quantidade vendida.
+CHAMADAS = {
+ "Beleza": (["✨ {nome}: um mimo de beleza que você merece", "Sua rotina de beleza pediu: {nome}", "{nome} para aquele momento só seu de autocuidado 💗", "Achadinho de beleza que separei pra você: {nome}", "Autocuidado também é prioridade: {nome}", "Um toque a mais na sua rotina: {nome} ✨"],
+            ["✨ {nome} com {pct}% off: autocuidado com preço de mimo", "Sua rotina de beleza com {pct}% off: {nome}", "{nome} ficou {pct}% mais em conta 💗"]),
+ "Casa e Cozinha": (["Pra deixar a casa com a sua cara: {nome} 🏡", "{nome}: o detalhe que faltava na sua casa", "Achadinho pra casa que separei pra você: {nome}", "Casa bonita começa nos detalhes: {nome} ✨", "{nome} para deixar o seu cantinho mais acolhedor", "Sua casa merece esse carinho: {nome}"],
+            ["{nome} com {pct}% off pra deixar a casa com a sua cara 🏡", "Casa caprichada gastando menos: {nome} com {pct}% off", "Detalhe novo pra casa, {pct}% mais em conta: {nome}"]),
+ "Moda": (["Pra montar um look que é a sua cara: {nome} ✨", "{nome}: a peça que o seu guarda-roupa pedia", "Achadinho de moda que separei pra você: {nome}", "Estilo mora nos detalhes: {nome} 💫", "{nome}: pra usar do seu jeito", "Look novo, sem complicação: {nome}"],
+            ["{nome} com {pct}% off: estilo que cabe no bolso ✨", "Look novo com {pct}% off: {nome}", "A peça que faltava, {pct}% mais em conta: {nome}"]),
+ "Eletrônicos": (["Tecnologia que facilita o seu dia: {nome} ⚡", "{nome}: praticidade que você vai amar", "Achadinho tech que separei pra você: {nome}", "Pra quem ama tecnologia bonita: {nome} ✨", "Seu dia a dia mais prático com {nome}", "Um upgrade na sua rotina: {nome}"],
+            ["{nome} com {pct}% off: upgrade com preço amigo ⚡", "Tecnologia com {pct}% off: {nome}", "Aquele upgrade, {pct}% mais em conta: {nome}"]),
+ "Organização e Limpeza": (["Tudo no lugar, do jeitinho que você gosta: {nome} ✨", "{nome}: casa organizada é casa leve", "Achadinho de organização que separei pra você: {nome}", "Pra rotina de limpeza ficar mais simples: {nome}", "Casa em ordem, cabeça leve: {nome}", "Menos bagunça, mais tranquilidade: {nome} 🧺"],
+            ["{nome} com {pct}% off: casa em ordem gastando menos ✨", "Organização com {pct}% off: {nome}", "Casa em ordem, {pct}% mais em conta: {nome}"]),
+ "Natal e Decoração": (["Pra deixar o seu Natal ainda mais encantador: {nome} 🎄", "{nome}: o detalhe que deixa a casa em clima de festa", "Achadinho de Natal que separei pra você: {nome}", "A magia mora nos detalhes: {nome} ✨", "Decoração que aquece a casa e o coração: {nome}", "Seu cantinho pronto para as festas com {nome}"],
+            ["{nome} com {pct}% off pra decorar com encanto 🎄", "Clima de festa com {pct}% off: {nome}", "O detalhe que faltava, {pct}% mais em conta: {nome}"]),
+ "Fitness e Esportes": (["Pra cuidar de você com estilo: {nome} ✨", "{nome}: um incentivo a mais pro seu treino", "Achadinho fitness que separei pra você: {nome}", "Seu treino merece esse capricho: {nome}", "Movimento também é autocuidado: {nome}", "Treino com mais estilo começa aqui: {nome} 💪"],
+            ["{nome} com {pct}% off: treino com estilo gastando menos", "Rotina fitness com {pct}% off: {nome} 💪", "Incentivo pro treino, {pct}% mais em conta: {nome}"]),
+}
+
+def nome_curto(produto, n=6, maximo=38):
+    t = re.split(r",\s| [-–|/] | \(| \+ ", str(produto or "").strip())[0].strip(" .:;-")
+    p = t.split()[:n]
+    while len(p) > 2 and len(" ".join(p)) > maximo: p.pop()
+    while len(p) > 2 and p[-1].lower().strip(".,") in {"para", "pra", "com", "de", "do", "da", "dos", "das", "e", "em", "p/", "c/", "no", "na", "ou", "a", "o"}: p.pop()
+    t = " ".join(p).rstrip(" .:;,-")
+    return t.title() if t.isupper() else t
+
+def chamada_padrao(c, vez=None):
+    """Chamada elegante por categoria. `vez` escolhe a variação (rodízio); sem ela, usa o ID da oferta."""
+    sem, com = CHAMADAS.get(c.get("C"), CHAMADAS["Casa e Cozinha"])
+    if vez is None: vez = int(re.sub(r"\D", "", str(c.get("A"))) or 0)
+    pct = 0
+    try:
+        atual = faixa(c["E"])[0]
+        if c.get("F") not in (None, "") and float(c["F"]) > atual: pct = round((1 - atual / float(c["F"])) * 100)
+    except (TypeError, ValueError, KeyError): pct = 0
+    modelos = com if pct >= 5 else sem
+    return modelos[vez % len(modelos)].format(nome=nome_curto(c.get("B")), pct=pct)
+
 def mensagem(c, cfg):
     """Monta a mensagem a partir de modelo-mensagem.txt. Linha com campo vazio é omitida."""
     val = como_data(c.get("H"))
@@ -163,7 +219,7 @@ def main():
     hoje = env.get("DATA_HOJE") or datetime.now().strftime("%Y-%m-%d")
     limite = int(cfg.get("MAX_OFERTAS_DIA_TOTAL") or 20)
     prontas, bloqueadas, aprovadas = [], [], {}
-    for row in wb["Ofertas"].iter_rows(min_row=2, max_col=18):
+    for row in wb["Ofertas"].iter_rows(min_row=2, max_col=19):
         c = {cell.column_letter: cell.value for cell in row}
         if not c.get("A") and not c.get("B"): continue
         if c.get("L") == "Aprovado": aprovadas.setdefault(c.get("C"), []).append(str(c["A"]))
@@ -175,7 +231,19 @@ def main():
     if a.destaque or a.enquete:
         return extras(a, env, cfg, wb, mapa, estado, hoje, prontas)
     ciclo = int(cfg.get("CICLO_DIAS") or 0)
-    if ciclo > 1 and not a.oferta:
+    por_grupo = int(cfg.get("MAX_POR_GRUPO_DIA") or 0)
+    if por_grupo and not a.oferta:
+        # Modo "melhores do dia": cada grupo recebe até MAX_POR_GRUPO_DIA ofertas, as que pagam mais por venda
+        # (preço x % de comissão), sem repetir oferta enviada nos últimos CICLO_DIAS dias.
+        hoje_d = datetime.strptime(hoje, "%Y-%m-%d").date()
+        def recente(c):
+            ult = estado.get(str(c["A"]))
+            try: return ult and (hoje_d - datetime.strptime(ult, "%Y-%m-%d").date()).days < max(ciclo, 1)
+            except ValueError: return False
+        frescas = [(c, m) for c, m in prontas if not recente(c)]
+        if frescas: prontas = frescas
+        prontas.sort(key=lambda x: (-ganho_estimado(x[0]), estado.get(str(x[0]["A"]), "")))
+    elif ciclo > 1 and not a.oferta:
         # A base inteira sai em `ciclo` dias e recomeca. Cada categoria (= grupo) se divide em partes iguais pelos dias,
         # pela ordem do ID entre as aprovadas, entao todo grupo recebe a mesma quantidade por dia.
         # Ciclo de 7 = semana: segunda e o dia 1 (a base e renovada na segunda e o ciclo recomeca).
@@ -184,8 +252,8 @@ def main():
         num = lambda i: int(re.sub(r"\D", "", i) or 0)
         posicao = {i: k for ids in aprovadas.values() for k, i in enumerate(sorted(ids, key=num))}
         prontas = [(c, m) for c, m in prontas if posicao.get(str(c["A"]), 0) % ciclo == turno]
-    prontas.sort(key=lambda x: estado.get(str(x[0]["A"]), ""))  # quem foi enviado há mais tempo vai primeiro
-    por_grupo = int(cfg.get("MAX_POR_GRUPO_DIA") or 0)
+    if not (por_grupo and not a.oferta):
+        prontas.sort(key=lambda x: estado.get(str(x[0]["A"]), ""))  # quem foi enviado há mais tempo vai primeiro
     if por_grupo:
         usados, sel = {}, []
         for c, m in prontas:
@@ -193,6 +261,10 @@ def main():
             if usados[c["C"]] <= por_grupo: sel.append((c, m))
         prontas = sel
     prontas = prontas[:limite]
+    vez_grupo = {}
+    for c, _ in prontas:  # chamada padrão em rodízio: o mesmo grupo não repete a variação em sequência
+        k = vez_grupo.get(c["C"], datetime.strptime(hoje, "%Y-%m-%d").toordinal()); vez_grupo[c["C"]] = k + 1
+        c["R"] = chamada_padrao(c, k)
     saida = [f"=== {c['A']} | {c['C']} ===\n{mensagem(c, cfg)}\n" for c, _ in prontas]
     if mapa.get("__AVISOS__"): saida.insert(0, "=== BOAS-VINDAS | Avisos ===\n" + (AQUI / "modelo-boasvindas.txt").read_text().strip() + "\n")
     (AQUI / "mensagens-do-dia.txt").write_text("\n".join(saida) or "(nenhuma oferta pronta)\n")
