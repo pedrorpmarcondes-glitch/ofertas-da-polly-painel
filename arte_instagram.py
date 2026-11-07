@@ -22,18 +22,20 @@ HASHTAGS = {"Beleza": "#beleza #skincare #cuidadoscomapele", "Casa e Cozinha": "
             "Moda": "#moda #look #estilo", "Eletrônicos": "#eletronicos #tecnologia #gadgets",
             "Organização e Limpeza": "#organizacao #limpeza #casaorganizada", "Natal e Decoração": "#natal #decoracao #decoracaodenatal",
             "Fitness e Esportes": "#fitness #treino #esportes",
-            "Decoração": "#decoracao #casadecorada #decor", "Kids": "#kids #infantil #maternidade"}
+            "Decoração": "#decoracao #casadecorada #decor", "Kids": "#kids #infantil #maternidade",
+            "Eletrodomésticos": "#eletrodomesticos #casa #praticidade"}
 BASE_TAGS = "#ofertas #achadinhos #promocao #ofertasdapolly"
 # Frase da capa por categoria: (linha amarela, linha branca). A faixa do meio vem dos vendidos ou do preco.
 FRASES = {"Beleza": ("o queridinho", "pro seu skincare"), "Casa e Cozinha": ("o achadinho", "pra sua cozinha"),
           "Moda": ("o achadinho", "pro seu look"), "Eletrônicos": ("o achadinho", "que facilita a vida"),
           "Organização e Limpeza": ("o achadinho", "pra casa organizada"), "Natal e Decoração": ("o achadinho", "pro seu natal"),
           "Fitness e Esportes": ("o achadinho", "pro seu treino"),
-          "Decoração": ("o achadinho", "pra decorar"), "Kids": ("o achadinho", "pros pequenos")}
+          "Decoração": ("o achadinho", "pra decorar"), "Kids": ("o achadinho", "pros pequenos"),
+          "Eletrodomésticos": ("o achadinho", "pra sua casa")}
 ASSUNTO = {"Beleza": "achadinho de beleza", "Casa e Cozinha": "achadinho de casa", "Moda": "achadinho de moda",
            "Eletrônicos": "achadinho de tecnologia", "Organização e Limpeza": "achadinho de organização",
            "Natal e Decoração": "achadinho de natal", "Fitness e Esportes": "achadinho fitness",
-           "Decoração": "achadinho de decoração", "Kids": "achadinho kids"}
+           "Decoração": "achadinho de decoração", "Kids": "achadinho kids", "Eletrodomésticos": "achadinho de eletro"}
 
 FONTES = Path(__file__).resolve().parent / "fonts"
 _ARQ = {"forte": "Poppins-Bold.ttf", "media": "Poppins-SemiBold.ttf", "leve": "Poppins-Medium.ttf",

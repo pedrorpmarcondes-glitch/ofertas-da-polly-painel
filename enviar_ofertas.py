@@ -76,7 +76,8 @@ def ganho_estimado(c):
     """Comissão estimada por venda (R$) = preço (limitado ao teto de impulso) x % de comissão."""
     try: preco = faixa(c["E"])[0]
     except (TypeError, ValueError): return 0.0
-    if preco > PRECO_TETO_IMPULSO: preco = PRECO_TETO_IMPULSO ** 2 / preco  # mais caro = compra menos por impulso
+    teto = 1500 if c.get("C") == "Eletrodomésticos" else PRECO_TETO_IMPULSO  # geladeira e fogão são compra planejada
+    if preco > teto: preco = teto ** 2 / preco  # mais caro = compra menos por impulso
     try: pct = float(str(c.get("S")).replace("%", "").replace(",", ".")) if c.get("S") not in (None, "") else None
     except ValueError: pct = None
     if pct is None:
@@ -107,6 +108,8 @@ CHAMADAS = {
             ["Decor caprichada gastando menos: {nome} com {pct}% off", "Seu cantinho mais bonito e {pct}% mais em conta: {nome}", "O toque que faltava na sua casa, {pct}% off: {nome}"]),
  "Kids": (["Separei com carinho pra rotina dos pequenos: {nome}", "Achadinho kids que separei pra você: {nome}", "Um mimo pros pequenos da sua vida: {nome} 💛", "{nome}: o detalhe que faltava no mundinho deles", "Mãe, tia ou vó coruja vai amar: {nome}", "Os pequenos merecem um mimo assim: {nome}"],
             ["Mimo pros pequenos gastando menos: {nome} com {pct}% off", "Carinho que cabe no bolso, {pct}% mais em conta: {nome}", "Pro mundinho deles, {pct}% off: {nome} 💛"]),
+ "Eletrodomésticos": (["Rotina mais leve começa aqui: {nome}", "{nome}: a praticidade que faltava no seu dia a dia", "Menos esforço, mais tempo pra você: {nome} ✨", "Sua casa merece esse upgrade: {nome}", "Eletro novo, rotina mais simples: {nome}", "Praticidade com cara de casa bem cuidada: {nome} 🏠"],
+            ["Praticidade em casa com {pct}% off: {nome}", "Casa equipada gastando menos: {nome} com {pct}% off", "Rotina mais leve e {pct}% mais em conta: {nome} ⚡"]),
  "Fitness e Esportes": (["Pra cuidar de você com estilo: {nome} ✨", "{nome}: um incentivo a mais pro seu treino", "Achadinho fitness que separei pra você: {nome}", "Seu treino merece esse capricho: {nome}", "Movimento também é autocuidado: {nome}", "Treino com mais estilo começa aqui: {nome} 💪"],
             ["{nome} com {pct}% off: treino com estilo gastando menos", "Rotina fitness com {pct}% off: {nome} 💪", "Incentivo pro treino, {pct}% mais em conta: {nome}"]),
 }
@@ -145,7 +148,8 @@ FORA_DO_PUBLICO = re.compile(r"\b(" + "|".join([
     r"barba", r"grecin", r"homme", r"cuecas?(?! meia)", r"carteira masculina", r"cal[çc]a masculina", r"jaqueta masculina",
     r"bermudas? masculinas?", r"camisetas? (b[áa]sicas? )?masculinas?", r"pulseiras masculinas", r"t[êe]nis masculino(?! feminino)",
     r"kit (\d+ )?cabos?", r"cabo (tipo|usb|carregador|adaptador)", r"carregador (turbo|iphone|de carro|retr[áa]til|tipo)",
-    r"kit carregador", r"cart[ãa]o de mem[óo]ria", r"teclado", r"mouse", r"c[âa]mera l[âa]mpada", r"ra[çc][ãa]o", r"areia (sanit|higi)",
+    r"kit carregador", r"cart[ãa]o de mem[óo]ria", r"kit com \d+ puxadores", r"puxador porta", r"puxador \(com", r"bot[õo]es para fog[ãa]o", r"bot[ãa]o manipulador",
+    r"grade \(trempe\)", r"prateleira da porta", r"descalcificante", r"controle remoto .*port[ãa]o", r"teclado", r"mouse", r"c[âa]mera l[âa]mpada", r"ra[çc][ãa]o", r"areia (sanit|higi)",
 ]) + r")\b", re.I)
 
 KIDS_PERMITIDO = re.compile(r"cuecas?|masculin[oa]s?|chuteiras?|meião|t[êe]nis masculino|bermudas? masculinas?|camisetas? (b[áa]sicas? )?masculinas?|pilhas?", re.I)
@@ -306,6 +310,10 @@ def main():
             if usados.get(c["C"], 0) >= por_grupo: continue
             tipo = (c["C"], (re.findall(r"[a-zà-ú]{3,}", str(c.get("B") or "").lower()) or [""])[0 if not str(c.get("B") or "").lower().startswith("kit") else -1])
             if tipos.get(tipo, 0) >= 3: sobra.append((c, m)); continue  # variedade: no máximo 3 do mesmo tipo por grupo/dia
+            try: caro = faixa(c["E"])[0] > 800
+            except (TypeError, ValueError): caro = False
+            if caro and tipos.get((c["C"], "caro"), 0) >= 8: sobra.append((c, m)); continue  # no máximo 8 itens acima de R$ 800
+            if caro: tipos[(c["C"], "caro")] = tipos.get((c["C"], "caro"), 0) + 1
             tipos[tipo] = tipos.get(tipo, 0) + 1; usados[c["C"]] = usados.get(c["C"], 0) + 1; sel.append((c, m))
         for c, m in sobra:  # completa o grupo se faltou variedade
             if usados.get(c["C"], 0) < por_grupo: usados[c["C"]] = usados.get(c["C"], 0) + 1; sel.append((c, m))
