@@ -118,6 +118,9 @@ def extras(a, env, cfg, wb, mapa, estado, hoje, prontas):
     if real and env.get("ENVIO_REAL", "NAO").upper() != "SIM": sys.exit("ENVIO_REAL não está SIM.")
     chave = "__DESTAQUE__" if a.destaque else "__ENQUETE__"
     if estado.get(chave) == hoje and real: print("já enviado hoje"); return
+    # O GitHub chega a atrasar horas: fora da janela, não envia (evita enquete de madrugada e repetida na virada do dia).
+    janela = (12, 14) if a.destaque else (20, 22)
+    if real and not janela[0] <= datetime.now().hour < janela[1]: print(f"fora da janela {janela[0]}h-{janela[1]}h: não envia"); return
     if a.enquete:
         arq = AQUI / "modelo-enquete.txt"
         pergunta = (arq.read_text().strip() if arq.exists() else "") or "Qual categoria você quer ver mais ofertas por aqui? 👇"
@@ -159,10 +162,11 @@ def main():
     if isinstance(estado, list): estado = {i: "2026-11-02" for i in estado}  # formato antigo
     hoje = env.get("DATA_HOJE") or datetime.now().strftime("%Y-%m-%d")
     limite = int(cfg.get("MAX_OFERTAS_DIA_TOTAL") or 20)
-    prontas, bloqueadas = [], []
+    prontas, bloqueadas, aprovadas = [], [], {}
     for row in wb["Ofertas"].iter_rows(min_row=2, max_col=18):
         c = {cell.column_letter: cell.value for cell in row}
         if not c.get("A") and not c.get("B"): continue
+        if c.get("L") == "Aprovado": aprovadas.setdefault(c.get("C"), []).append(str(c["A"]))
         if a.oferta and str(c.get("A")) != a.oferta: continue
         if c.get("L") != "Aprovado" or (estado.get(str(c.get("A"))) == hoje and not a.destaque and not a.oferta): continue
         motivo = validar(c, cfg, mapa)
@@ -171,14 +175,15 @@ def main():
     if a.destaque or a.enquete:
         return extras(a, env, cfg, wb, mapa, estado, hoje, prontas)
     ciclo = int(cfg.get("CICLO_DIAS") or 0)
-    if ciclo > 1 and not a.oferta:  # a rede inteira sai em `ciclo` dias e recomeça: cada oferta tem um dia fixo (pela ordem do ID)
-        ordem = {}
-        for row in wb["Ofertas"].iter_rows(min_row=2, max_col=1):
-            i = row[0].value
-            if i: ordem[str(i)] = int(re.sub(r"\D", "", str(i)) or 0)
-        ids = sorted(ordem, key=lambda k: ordem[k])
-        turno = datetime.strptime(hoje, "%Y-%m-%d").toordinal() % ciclo
-        prontas = [(c, m) for c, m in prontas if ids.index(str(c["A"])) % ciclo == turno]
+    if ciclo > 1 and not a.oferta:
+        # A base inteira sai em `ciclo` dias e recomeca. Cada categoria (= grupo) se divide em partes iguais pelos dias,
+        # pela ordem do ID entre as aprovadas, entao todo grupo recebe a mesma quantidade por dia.
+        # Ciclo de 7 = semana: segunda e o dia 1 (a base e renovada na segunda e o ciclo recomeca).
+        dia = datetime.strptime(hoje, "%Y-%m-%d")
+        turno = dia.weekday() if ciclo == 7 else dia.toordinal() % ciclo
+        num = lambda i: int(re.sub(r"\D", "", i) or 0)
+        posicao = {i: k for ids in aprovadas.values() for k, i in enumerate(sorted(ids, key=num))}
+        prontas = [(c, m) for c, m in prontas if posicao.get(str(c["A"]), 0) % ciclo == turno]
     prontas.sort(key=lambda x: estado.get(str(x[0]["A"]), ""))  # quem foi enviado há mais tempo vai primeiro
     por_grupo = int(cfg.get("MAX_POR_GRUPO_DIA") or 0)
     if por_grupo:
@@ -195,6 +200,8 @@ def main():
     if not a.enviar: print("SIMULAÇÃO: nada foi enviado."); return
     if env.get("ENVIO_REAL", "NAO").upper() != "SIM": sys.exit("ENVIO_REAL não está SIM no .env. Nada enviado.")
     if not a.auto and input(f"Enviar {len(prontas)} mensagem(ns) de verdade? Digite CONFIRMO: ").strip() != "CONFIRMO": sys.exit("Cancelado.")
+    if a.auto and not a.oferta and not 8 <= datetime.now().hour < 19:
+        print("fora da janela 08h-19h: envio automático não sai à noite nem de madrugada"); return
     erros = 0; falhas_destino = {}
     passo = 1.0 if a.oferta else max(20.0, float(env.get("JANELA_SEG") or 6900) / (len(prontas) + 1))  # espalha o envio em ~115 min (09:00 a ~11:00)
     if mapa.get("__AVISOS__") and not a.grupo_teste and not a.oferta and estado.get("__AVISOS__") != hoje:
