@@ -69,7 +69,7 @@ def validar(c, cfg, grupos):
 
 # % de comissão usado para priorizar. Amazon: tabela oficial por categoria (06/11/2026). Shopee e Mercado Livre
 # variam por produto: use a coluna S ("Comissão %") quando souber; sem ela, vale o padrão da loja.
-COMISSAO_PADRAO = {"Amazon": {"Beleza": 13, "Moda": 11}, "Amazon*": 8, "Shopee*": 8, "Mercado Livre*": 8}
+COMISSAO_PADRAO = {"Amazon": {"Beleza": 13, "Moda": 11, "Kids": 11}, "Amazon*": 8, "Shopee*": 8, "Mercado Livre*": 8}
 PRECO_TETO_IMPULSO = 250  # acima disso quase ninguém compra pelo WhatsApp: perde prioridade
 
 def ganho_estimado(c):
@@ -85,7 +85,8 @@ def ganho_estimado(c):
         pct = pct or COMISSAO_PADRAO.get(loja + "*", 7)
     ganho = preco * pct / 100
     if DESEJO.search(str(c.get("B") or "")): ganho *= 1.5  # o que o público feminino mais quer: beleza, perfume, cozinha, casa
-    if re.search(r"masculin", str(c.get("B") or ""), re.I): ganho *= 0.5
+    if re.search(r"masculin", str(c.get("B") or ""), re.I) and c.get("C") != "Kids": ganho *= 0.5
+    if c.get("C") == "Kids" and re.search(r"roupa|conjunto|pijama|body|vestido|brinquedo|boneca|inalador|nebulizador|term[ôo]metro|sabonete|shampoo|fralda|len[çc]o", str(c.get("B") or ""), re.I): ganho *= 1.5
     return ganho
 
 # Chamada padrão (time de copy, 06/11/2026). Regra do dono: nunca citar nota, estrelas ou quantidade vendida.
@@ -102,6 +103,10 @@ CHAMADAS = {
             ["{nome} com {pct}% off: casa em ordem gastando menos ✨", "Organização com {pct}% off: {nome}", "Casa em ordem, {pct}% mais em conta: {nome}"]),
  "Natal e Decoração": (["Pra deixar o seu Natal ainda mais encantador: {nome} 🎄", "{nome}: o detalhe que deixa a casa em clima de festa", "Achadinho de Natal que separei pra você: {nome}", "A magia mora nos detalhes: {nome} ✨", "Decoração que aquece a casa e o coração: {nome}", "Seu cantinho pronto para as festas com {nome}"],
             ["{nome} com {pct}% off pra decorar com encanto 🎄", "Clima de festa com {pct}% off: {nome}", "O detalhe que faltava, {pct}% mais em conta: {nome}"]),
+ "Decoração": (["Sua casa pediu um toque especial: {nome}", "{nome}: o charme que faltava no seu cantinho ✨", "Achadinho de decor que separei pra você: {nome}", "Pra deixar seu espaço com a sua cara: {nome}", "Um detalhe de carinho pra sua casa ou escritório: {nome}", "Casa e escritório com mais personalidade: {nome}"],
+            ["Decor caprichada gastando menos: {nome} com {pct}% off", "Seu cantinho mais bonito e {pct}% mais em conta: {nome}", "O toque que faltava na sua casa, {pct}% off: {nome}"]),
+ "Kids": (["Separei com carinho pra rotina dos pequenos: {nome}", "Achadinho kids que separei pra você: {nome}", "Um mimo pros pequenos da sua vida: {nome} 💛", "{nome}: o detalhe que faltava no mundinho deles", "Mãe, tia ou vó coruja vai amar: {nome}", "Os pequenos merecem um mimo assim: {nome}"],
+            ["Mimo pros pequenos gastando menos: {nome} com {pct}% off", "Carinho que cabe no bolso, {pct}% mais em conta: {nome}", "Pro mundinho deles, {pct}% off: {nome} 💛"]),
  "Fitness e Esportes": (["Pra cuidar de você com estilo: {nome} ✨", "{nome}: um incentivo a mais pro seu treino", "Achadinho fitness que separei pra você: {nome}", "Seu treino merece esse capricho: {nome}", "Movimento também é autocuidado: {nome}", "Treino com mais estilo começa aqui: {nome} 💪"],
             ["{nome} com {pct}% off: treino com estilo gastando menos", "Rotina fitness com {pct}% off: {nome} 💪", "Incentivo pro treino, {pct}% mais em conta: {nome}"]),
 }
@@ -124,7 +129,8 @@ def chamada_padrao(c, vez=None):
         if c.get("F") not in (None, "") and float(c["F"]) > atual: pct = round((1 - atual / float(c["F"])) * 100)
     except (TypeError, ValueError, KeyError): pct = 0
     modelos = com if pct >= 5 else sem
-    return modelos[vez % len(modelos)].format(nome=nome_curto(c.get("B")), pct=pct)
+    txt = modelos[vez % len(modelos)].format(nome=nome_curto(c.get("B")), pct=pct)
+    return txt[:1].upper() + txt[1:]
 
 # Público da Polly é feminino (decisão do dono, 06/11/2026): nada de peça, ferramenta, item de carro/moto,
 # material elétrico, cabo/carregador simples, limpeza pesada ou produto só masculino.
@@ -142,8 +148,13 @@ FORA_DO_PUBLICO = re.compile(r"\b(" + "|".join([
     r"kit carregador", r"cart[ãa]o de mem[óo]ria", r"teclado", r"mouse", r"c[âa]mera l[âa]mpada", r"ra[çc][ãa]o", r"areia (sanit|higi)",
 ]) + r")\b", re.I)
 
+KIDS_PERMITIDO = re.compile(r"cuecas?|masculin[oa]s?|chuteiras?|meião|t[êe]nis masculino|bermudas? masculinas?|camisetas? (b[áa]sicas? )?masculinas?|pilhas?", re.I)
+
 def fora_do_publico(c):
     nome = str(c.get("B") or "")
+    if c.get("C") == "Kids":  # roupa de menino, chuteira infantil e brinquedo a pilha são do público (mães compram)
+        achou = [m.group(0) for m in FORA_DO_PUBLICO.finditer(nome)]
+        return any(not KIDS_PERMITIDO.fullmatch(x) for x in achou)
     if re.search(r"\bcuecas?\b", nome, re.I) and re.search(r"calcinha", nome, re.I): nome = re.sub(r"cuecas?", "", nome, flags=re.I)
     if re.search(r"feminin[oa]|espelho|\bmop\b", nome, re.I) and not re.search(r"masculin|cueca", nome, re.I): return False
     return bool(FORA_DO_PUBLICO.search(nome))
@@ -214,7 +225,8 @@ def extras(a, env, cfg, wb, mapa, estado, hoje, prontas):
     if a.enquete:
         arq = AQUI / "modelo-enquete.txt"
         pergunta = (arq.read_text().strip() if arq.exists() else "") or "Qual categoria você quer ver mais ofertas por aqui? 👇"
-        opcoes = [k for k in mapa if not k.startswith("__")]
+        apelido = {"Casa e Cozinha": "Casa", "Natal e Decoração": "Natal", "Decoração": "Decoração para casa e escritório"}
+        opcoes = [apelido.get(k, k) for k in mapa if not k.startswith("__")]
         print("ENQUETE:", pergunta, opcoes)
         if real:
             st, corpo = enviar_enquete(env, destino, pergunta, opcoes); log(["enquete", destino, "enviada", f"{st} {corpo}"])
